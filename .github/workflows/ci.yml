@@ -1,74 +1,173 @@
-name: CI
+name: CI/CD Ubuntu
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to el-dorado after all checks pass
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          node-version: 20
-          cache: npm
-
-      # 1) Install with lockfile enforcement
-      - name: Install
-        run: npm ci
-
-      # 2) Format check
-      - name: Prettier check
-        run: npx prettier --check "src/**/*.{ts,tsx}"
-
-      # 3) Lint
-      - name: Lint
-        run: npm run lint
-
-      # 4) Type check
-      - name: Type check
-        run: npm run typecheck
-
-      # 5) Unit + property-based tests
-      - name: Unit & property tests
-        run: npm test
-
-      # 6) Dependency audit (non-blocking; report high severity)
-      - name: Dependency audit
-        run: npm audit --audit-level=high || true
-
-      # 7) Production build
-      - name: Build
-        run: npm run build
-
-  e2e:
-    runs-on: ubuntu-latest
-    needs: verify
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-      - name: E2E tests
-        run: npm run test:e2e
+      - name: Prettier check
+        run: npx prettier --check "src/**/*.{ts,tsx}"
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Dependency audit (advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+      - run: npm run build
+
+  e2e:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- --reporter=list,html --trace=retain-on-failure
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
 
   container:
+    needs: [verify, e2e]
     runs-on: ubuntu-latest
-    needs: verify
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - name: Build container image
-        run: docker build -t cisco-wifi-planner:ci .
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: docker build --tag "air-plan:$GITHUB_SHA" .
+      - name: Smoke test the actual image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name air-plan-smoke -p 127.0.0.1:3000:3000 "air-plan:$GITHUB_SHA"
+          trap 'docker logs air-plan-smoke; docker rm -f air-plan-smoke' EXIT
+          curl --fail --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1:3000/api/health
+          curl --fail http://127.0.0.1:3000/api/ready
+      - name: Export tested image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: docker save "air-plan:$GITHUB_SHA" | gzip > air-plan.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          name: air-plan-${{ github.sha }}
+          path: air-plan.tar.gz
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
 
-  # Staging deploy would run here after `container`, followed by a staging smoke
-  # test. Production deploy requires a MANUAL approval gate (GitHub Environments
-  # protection rule) and is intentionally not automated in this workflow.
+  deploy:
+    name: Deploy to Ubuntu
+    needs: [verify, e2e, container]
+    if: >-
+      github.repository == 'sabaszx/dify-airplan' &&
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.deploy) ||
+       (github.event_name == 'push' && vars.AUTO_DEPLOY == 'true'))
+    runs-on: [self-hosted, Linux, X64]
+    environment: production
+    timeout-minutes: 15
+    concurrency:
+      group: air-plan-production
+      cancel-in-progress: false
+    env:
+      APP_PORT: ${{ vars.APP_PORT || '3000' }}
+      BIND_ADDRESS: ${{ vars.BIND_ADDRESS || '127.0.0.1' }}
+    steps:
+      # No repository checkout or PR code execution on the production runner.
+      - name: Preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(hostname -s)" = el-dorado
+          docker info > /dev/null
+          command -v curl
+          [[ "$APP_PORT" =~ ^[0-9]+$ ]] && (( APP_PORT > 0 && APP_PORT < 65536 ))
+          [[ "$BIND_ADDRESS" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: air-plan-${{ github.sha }}
+          path: ${{ runner.temp }}/air-plan-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Load and deploy with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/air-plan-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/air-plan.tar.gz"
+          gzip -dc "$archive" | docker load
+          rm -f "$archive"
+          app=air-plan
+          backup="air-plan-rollback-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          previous=false
+          # Do not replace a container belonging to another application.
+          if docker container inspect "$app" > /dev/null 2>&1; then
+            owner=$(docker inspect --format '{{ index .Config.Labels "io.air-plan.managed" }}' "$app")
+            test "$owner" = github-actions
+            docker stop "$app"
+            docker rename "$app" "$backup"
+            previous=true
+          fi
+          rollback() {
+            docker logs "$app" || true
+            docker rm -f "$app" || true
+            if "$previous"; then
+              docker rename "$backup" "$app"
+              docker start "$app"
+            fi
+          }
+          trap rollback ERR
+          docker run -d --name "$app" --restart unless-stopped \
+            --label io.air-plan.managed=github-actions \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -p "$BIND_ADDRESS:$APP_PORT:3000" "air-plan:$GITHUB_SHA"
+          for attempt in {1..40}; do
+            status=$(docker inspect --format '{{.State.Health.Status}}' "$app")
+            if [ "$status" = healthy ]; then break; fi
+            sleep 3
+          done
+          test "$status" = healthy
+          docker exec "$app" wget -qO- http://127.0.0.1:3000/api/ready
+          trap - ERR
+          if "$previous"; then docker rm "$backup"; fi
+          printf 'Deployed `air-plan:%s` on el-dorado, bind `%s:%s`.\n' "$GITHUB_SHA" "$BIND_ADDRESS" "$APP_PORT" >> "$GITHUB_STEP_SUMMARY"
