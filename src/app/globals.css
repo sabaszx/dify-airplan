@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-base-bg text-base-text antialiased;
+}
+
+/* Focus-visible outline for accessibility */
+:focus-visible {
+  outline: 2px solid theme("colors.accent.DEFAULT");
+  outline-offset: 2px;
+}
+
+.panel {
+  @apply bg-base-panel border border-base-border rounded-lg;
+}
+
+.btn {
+  @apply inline-flex items-center gap-2 rounded-md border border-base-border bg-base-panel px-3 py-1.5 text-sm hover:border-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply bg-accent border-accent text-white hover:opacity-90;
+}
+
+.input {
+  @apply w-full rounded-md border border-base-border bg-base-bg px-2 py-1.5 text-sm focus:border-accent;
+}
+
+.label {
+  @apply text-xs font-medium text-base-muted mb-1 block;
+}

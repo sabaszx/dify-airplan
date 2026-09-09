@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Format & lint on TS save",
+      "trigger": "PostFileSave",
+      "description": "On saving a .ts/.tsx file, format it with Prettier and run ESLint on just that file. Does not modify other files or loop.",
+      "matcher": "\\.(ts|tsx)$",
+      "action": {
+        "type": "command",
+        "command": "npx prettier --write \"$KIRO_FILE_PATH\" >/dev/null 2>&1; npx eslint \"$KIRO_FILE_PATH\" 2>&1 | tail -20 || true",
+        "timeout": 90
+      }
+    }
+  ]
+}

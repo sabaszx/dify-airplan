@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Run related unit tests on test save",
+      "trigger": "PostFileSave",
+      "description": "When a test file or source file under src changes, run the smallest relevant Vitest suite for the touched path and report failures clearly.",
+      "matcher": "src/.*\\.(ts|tsx)$",
+      "action": {
+        "type": "command",
+        "command": "npx vitest related --run \"$KIRO_FILE_PATH\" 2>&1 | tail -30 || true",
+        "timeout": 120
+      }
+    }
+  ]
+}

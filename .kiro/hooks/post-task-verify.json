@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Post-task verification",
+      "trigger": "PostTaskExec",
+      "description": "After a spec task completes, run format check, lint, type check, and the unit test suite, reporting results. Non-blocking; surfaces failures for the agent to fix.",
+      "action": {
+        "type": "command",
+        "command": "echo \"== prettier check ==\"; npx prettier --check \"src/**/*.{ts,tsx}\" 2>&1 | tail -5; echo \"== lint ==\"; npx next lint 2>&1 | tail -5; echo \"== typecheck ==\"; npx tsc --noEmit 2>&1 | tail -10; echo \"== unit tests ==\"; npx vitest run 2>&1 | tail -8",
+        "timeout": 300
+      }
+    }
+  ]
+}

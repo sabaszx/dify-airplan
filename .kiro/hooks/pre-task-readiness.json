@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Pre-task readiness check",
+      "trigger": "PreTaskExec",
+      "description": "Before a spec task runs, confirm dependencies are installed and report the working-tree status so the agent understands the starting point.",
+      "action": {
+        "type": "command",
+        "command": "test -d node_modules || echo \"WARN: node_modules missing — run npm install\"; echo \"--- git status ---\"; git status --short 2>/dev/null | head -30 || echo \"not a git repo\"",
+        "timeout": 60
+      }
+    }
+  ]
+}

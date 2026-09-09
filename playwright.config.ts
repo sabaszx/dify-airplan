@@ -1,0 +1,26 @@
+import { defineConfig, devices } from "@playwright/test";
+
+/**
+ * Playwright config for the critical canvas workflows. Starts the Next.js dev
+ * server automatically and runs specs in e2e/.
+ */
+export default defineConfig({
+  testDir: "./e2e",
+  timeout: 30_000,
+  expect: { timeout: 7_000 },
+  fullyParallel: false,
+  retries: 0,
+  reporter: [["list"]],
+  use: {
+    baseURL: "http://localhost:3000",
+    trace: "on-first-retry",
+    viewport: { width: 1440, height: 900 },
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  webServer: {
+    command: "npm run dev",
+    url: "http://localhost:3000",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
+});

@@ -1,0 +1,18 @@
+# Local PostgreSQL for the future persistence adapter. The current MVP persists
+# projects client-side (localStorage); this service is provided so the DB-backed
+# adapter can be wired without changing the store contract. See README.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cwp
+      POSTGRES_PASSWORD: cwp
+      POSTGRES_DB: cwp
+    ports:
+      - "5432:5432"
+    volumes:
+      - cwp_pgdata:/var/lib/postgresql/data
+
+volumes:
+  cwp_pgdata:

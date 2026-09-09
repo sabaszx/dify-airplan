@@ -1,0 +1,19 @@
+{
+  "//": "TEMPLATE — copy to .kiro/settings/mcp.json (workspace) to enable. All servers are disabled by default and read-only. See docs/mcp-security.md. The app must not depend on any MCP server at runtime.",
+  "mcpServers": {
+    "aws-docs": {
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "env": { "FASTMCP_LOG_LEVEL": "ERROR" },
+      "disabled": true,
+      "autoApprove": ["read", "search"]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": { "FASTMCP_LOG_LEVEL": "ERROR" },
+      "disabled": true,
+      "autoApprove": ["fetch"]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Agent stop quality gate",
+      "trigger": "Stop",
+      "description": "Before work is declared complete, check for accidentally committed focused/skipped tests and unresolved TypeScript errors, and run the unit suite. Reports issues; does not modify or deploy anything.",
+      "action": {
+        "type": "command",
+        "command": "echo \"== focused/skipped tests ==\"; grep -rnE \"\\.(only|skip)\\(|fit\\(|fdescribe\\(|xit\\(|xdescribe\\(\" src e2e 2>/dev/null | grep -v node_modules | tail -20 || echo \"none\"; echo \"== typecheck ==\"; npx tsc --noEmit 2>&1 | tail -10 || true; echo \"== unit tests ==\"; npx vitest run 2>&1 | tail -8 || true",
+        "timeout": 300
+      }
+    }
+  ]
+}
