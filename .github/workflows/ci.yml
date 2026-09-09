@@ -84,7 +84,7 @@ jobs:
           set -euo pipefail
           docker run -d --name air-plan-smoke -p 127.0.0.1:3000:3000 "air-plan:$GITHUB_SHA"
           trap 'docker logs air-plan-smoke; docker rm -f air-plan-smoke' EXIT
-          curl --fail --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1:3000/api/health
+          curl --fail --max-time 5 --retry 30 --retry-delay 2 --retry-all-errors --retry-max-time 120 http://127.0.0.1:3000/api/health
           curl --fail http://127.0.0.1:3000/api/ready
       - name: Export tested image
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
