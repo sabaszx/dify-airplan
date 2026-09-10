@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { localProjectStore } from "@/lib/storage";
+import { loadValidatedProject } from "@/lib/load-project";
 import { activeScenario } from "@/store/editor";
 import { buildReportSnapshot, type CalculationSettings } from "@/lib/report-snapshot";
 import { renderReportHtml } from "@/lib/report-view";
@@ -13,9 +13,9 @@ import { renderReportHtml } from "@/lib/report-view";
  * options (hidePrices/hideCustomerFields/print) so a future server route can
  * pass the same options after validating a share token.
  *
- * NOTE (documented): in the client-persisted MVP this reads the local project.
- * A production build would render from a stored snapshot fetched after
- * server-side share-token validation (see src/lib/share-link.ts).
+ * `useSearchParams` MUST be used inside a <Suspense> boundary (Next 14 App
+ * Router). The inner component that reads it is wrapped below. Snapshot building
+ * is guarded so malformed/missing data yields a localized error, not a crash.
  */
 const CALC: CalculationSettings = {
   gridResolutionM: 0.5,
@@ -26,34 +26,79 @@ const CALC: CalculationSettings = {
 };
 
 export default function ReportPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center text-base-muted">
+          Preparing report…
+        </div>
+      }
+    >
+      <ReportInner />
+    </Suspense>
+  );
+}
+
+function ReportInner() {
   const { id } = useParams<{ id: string }>();
   const params = useSearchParams();
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const project = await localProjectStore.get(id);
-      if (!project) {
-        setError("Report not found.");
-        return;
-      }
-      const scn = activeScenario(project);
-      const snapshot = buildReportSnapshot(project, scn, {}, CALC, {
-        now: new Date().toISOString(),
-      });
-      setHtml(
-        renderReportHtml(snapshot, {
+      try {
+        const loaded = await loadValidatedProject(id);
+        if (!loaded.ok) {
+          if (!cancelled) {
+            setError(
+              loaded.reason === "not-found"
+                ? "Report not found. The project may have been deleted."
+                : "This report could not be generated: the stored project data is invalid or from an unsupported version.",
+            );
+          }
+          return;
+        }
+        const project = loaded.project;
+        const scn = activeScenario(project);
+        const snapshot = buildReportSnapshot(project, scn, {}, CALC, {
+          now: new Date().toISOString(),
+        });
+        const out = renderReportHtml(snapshot, {
           hidePrices: params.get("hidePrices") === "1",
           hideCustomerFields: params.get("hideCustomer") === "1",
           print: params.get("print") === "1",
-        }),
-      );
+        });
+        if (!cancelled) setHtml(out);
+      } catch (err) {
+        // Localized, user-readable error — never an unhandled client exception.
+        if (!cancelled) {
+          setError(
+            "This report could not be generated from the current project data. The project may be incomplete or use an unsupported format.",
+          );
+          // Structured, sensitive-data-free client log.
+          console.error("[report] snapshot build failed", {
+            route: "/report/[id]",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [id, params]);
 
   if (error) {
-    return <div className="flex h-screen items-center justify-center text-base-muted">{error}</div>;
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center text-base-muted">
+        <p className="max-w-md">{error}</p>
+        <a href="/" className="btn">
+          Back to projects
+        </a>
+      </div>
+    );
   }
   if (!html) {
     return (
