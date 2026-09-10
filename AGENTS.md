@@ -4,6 +4,7 @@ Concise repository-wide rules for AI agents and contributors. Detailed guidance
 lives in `.kiro/steering/` (auto-included by matching topic).
 
 ## Golden rules
+
 - Predictive RF outputs are estimates, never measurements — always show the disclaimer.
 - Cisco specs & antenna patterns are sample/unverified until imported from official
   docs with recorded provenance. No Cisco logos or copyrighted datasheet content.
@@ -17,12 +18,14 @@ lives in `.kiro/steering/` (auto-included by matching topic).
 - No placeholder controls or TODO-only implementations in completed tasks.
 
 ## Verification
+
 ```
 npm run typecheck && npm run lint && npm test && npm run build
 npx playwright install chromium && npm run test:e2e
 ```
 
 ## Steering map
+
 product / tech / structure / architecture / security / definition-of-done
 (always). canvas-editor, rf-domain, antenna-patterns, cisco-catalog, reporting,
 testing, api-standards, database-standards, ux-design-system, accessibility,

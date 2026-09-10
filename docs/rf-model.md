@@ -4,6 +4,7 @@ The engine (`src/rf`) is deterministic and framework-independent. Full derivatio
 is in `.kiro/specs/cisco-wifi-planner/design.md` §3; this is a summary.
 
 ## Equations
+
 - Free-space path loss (dB, meters/MHz): `FSPL = 20·log10(d) + 20·log10(f) − 27.55`.
 - Log-distance: `PL(d) = PL(d0) + 10·n·log10(d/d0)`, `d0 = 1 m`, `PL(d0)` is the
   frequency-aware FSPL at 1 m; exponent `n` by environment (open 2.0, office 3.0,
@@ -21,13 +22,16 @@ is in `.kiro/specs/cisco-wifi-planner/design.md` §3; this is a summary.
 - PHY/throughput/capacity: configurable lookup tables (planning estimates).
 
 ## Determinism & caching
+
 Identical inputs → identical outputs (property-tested). Simulation cache key
 includes floor/band/scenario/resolution/walls/APs and pattern revision.
 
 ## Disclaimer
+
 Predictive estimates only — validate with an on-site survey and applicable
 regulations. Not measurements.
 
 ## Verified invariants (property-based, `src/**/invariants.property.test.ts`)
+
 Distance monotonicity, attenuation monotonicity, circular-interpolation
 continuity, invalid channels never assigned, omni rotation invariance.

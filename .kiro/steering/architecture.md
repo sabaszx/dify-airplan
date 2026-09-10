@@ -18,11 +18,13 @@ without a browser.
 9. Export/report generation (`lib/export.ts`, report snapshot)
 
 ## Adapters / seams
+
 `ProjectStore` (persistence), `CatalogImporter` (verified data), `PatternImporter`
 (vendor pattern formats), storage/auth via `env.ts`. Future Cisco Catalyst
 Center / Meraki integrations MUST be read-only by default.
 
 ## Key rules
+
 - Immutable product and antenna-pattern revisions; APs carry a `catalogSnapshot`
   so future catalog changes never silently alter existing simulations.
 - Every canvas mutation is a Command (execute/undo/redo, drag coalesced to one).

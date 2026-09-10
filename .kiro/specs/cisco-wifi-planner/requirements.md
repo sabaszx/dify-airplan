@@ -213,3 +213,39 @@ antenna model.
 - 14.11 THE SYSTEM SHALL support AP library placement (cards, search/filter,
   continuous placement, replace-preserving-location) and expose radio/antenna
   settings immediately on placement.
+
+---
+
+## 15. Wall thickness, materials, hierarchy, visibility, 3D (override)
+
+**User story:** As an engineer I want editable physical wall thickness, a custom
+material library, an explicit floor hierarchy, independent technology visibility,
+and a 3D view derived from the 2D design.
+
+- 15.1 WHEN a user edits a wall THE SYSTEM SHALL allow changing physical thickness
+  (numeric/slider/increment/presets/bulk) stored in meters and displayed in
+  mm/cm/m/in/ft; changing zoom SHALL NOT change stored thickness; changing
+  thickness SHALL NOT change attenuation unless the material uses a
+  thickness-dependent model.
+- 15.2 THE SYSTEM SHALL provide resize alignment (centerline/left/right).
+- 15.3 THE SYSTEM SHALL provide a material library: add/edit/duplicate/archive/
+  restore, per-technology/frequency attenuation in dB, validation (reject
+  NaN/Infinity/negative unless overridden, duplicate frequencies, require a
+  source or mark unverified), versioning, and JSON import/export.
+- 15.4 THE SYSTEM SHALL model an Area/Site/Building/Floor hierarchy; Building and
+  Floor SHALL be explicit; floors SHALL order by explicit sortOrder/elevation,
+  never by string name; users SHALL add/duplicate/archive/delete floors; delete
+  SHALL be refused for a floor referenced by an immutable report snapshot.
+- 15.5 THE SYSTEM SHALL provide independent Wi-Fi/BLE/UWB visibility states
+  (hidden / devices / devices+analysis / analysis-only), keyboard-accessible,
+  with distinct symbols, persisted per view; visibility SHALL NOT delete devices
+  or change simulation configuration, and SHALL work in 2D and 3D.
+- 15.6 THE SYSTEM SHALL provide a 3D view derived from the SAME 2D data (no
+  separate 3D model), extruding walls by physical thickness+height and stacking
+  floors at their real elevations, with Floor/Building/Split modes and selection
+  sync; a 3D failure or missing WebGL SHALL NOT crash the 2D editor.
+- 15.7 THE SYSTEM SHALL open existing (pre-migration) projects via
+  backward-compatible migrations (legacy walls receive a documented default
+  thickness; floors are placed under a valid building).
+- 15.8 THE SYSTEM SHALL render error boundaries at the route, editor, and 3D
+  levels; malformed persisted state SHALL yield a localized error, not a crash.

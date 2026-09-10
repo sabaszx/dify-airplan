@@ -33,7 +33,27 @@ export type AttenuationModel = z.infer<typeof AttenuationModelSchema>;
 export const AttenuationKeyEnum = z.enum(["2.4", "5", "6", "ble", "uwb"]);
 export type AttenuationKey = z.infer<typeof AttenuationKeyEnum>;
 
-/** Wall/material with per-band attenuation (planning defaults, editable). */
+/** A single explicit attenuation sample (dB) for a technology + frequency.
+ *  Attenuation is always entered in dB (override §3.1). */
+export const AttenuationSampleSchema = z.object({
+  technology: z.enum(["WIFI", "BLE", "UWB"]),
+  frequencyMHz: z.number().positive(),
+  lossDb: z.number(),
+});
+export type AttenuationSample = z.infer<typeof AttenuationSampleSchema>;
+
+export const MaterialVerificationEnum = z.enum([
+  "draft",
+  "sample",
+  "user-entered",
+  "manually-reviewed",
+  "verified",
+  "deprecated",
+]);
+export type MaterialVerification = z.infer<typeof MaterialVerificationEnum>;
+
+/** Wall/material with per-band attenuation (planning defaults, editable). All
+ *  extended library fields are optional so legacy records remain valid. */
 export const WallMaterialSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -42,6 +62,25 @@ export const WallMaterialSchema = z.object({
   /** Optional per-technology attenuation MODELS (fixed / per-thickness / base+). */
   models: z.record(AttenuationKeyEnum, AttenuationModelSchema).optional(),
   isDefault: z.boolean().default(true),
+
+  // --- Extended material-library fields (override §3). All optional. ---
+  description: z.string().optional(),
+  displayColor: z.string().optional(),
+  displayPattern: z.enum(["solid", "hatch", "dashed", "dotted"]).optional(),
+  defaultThicknessM: z.number().positive().optional(),
+  minThicknessM: z.number().positive().optional(),
+  maxThicknessM: z.number().positive().optional(),
+  wallHeightDefaultM: z.number().positive().optional(),
+  /** Explicit per-technology/frequency attenuation samples (dB). */
+  attenuationSamples: z.array(AttenuationSampleSchema).optional(),
+  source: z.string().optional(),
+  verificationStatus: MaterialVerificationEnum.optional(),
+  notes: z.string().optional(),
+  version: z.number().int().nonnegative().optional(),
+  createdBy: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  archived: z.boolean().optional(),
 });
 export type WallMaterial = z.infer<typeof WallMaterialSchema>;
 
@@ -206,6 +245,13 @@ export const FloorSchema = z.object({
   name: z.string(),
   index: z.number().int(),
   ceilingHeightM: z.number().default(3),
+  // Floor hierarchy / explicit ordering (override §4.3). Optional with defaults
+  // so legacy projects migrate cleanly; ordering must not rely on string sort.
+  floorNumber: z.number().int().default(1),
+  sortOrder: z.number().default(0),
+  baseElevationM: z.number().default(0),
+  floorToFloorM: z.number().positive().default(3.5),
+  archived: z.boolean().default(false),
   plan: FloorPlanSchema.nullable(),
   walls: z.array(WallSchema).default([]),
   accessPoints: z.array(AccessPointSchema).default([]),
@@ -213,11 +259,24 @@ export const FloorSchema = z.object({
 });
 export type Floor = z.infer<typeof FloorSchema>;
 
+/** A building groups floors. Area/Site are optional wrappers (override §4). */
+export const BuildingSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  siteId: z.string().optional(),
+  areaId: z.string().optional(),
+  floorIds: z.array(z.string()).default([]),
+  archived: z.boolean().default(false),
+});
+export type Building = z.infer<typeof BuildingSchema>;
+
 export const ScenarioSchema = z.object({
   id: z.string(),
   name: z.string(),
   isBaseline: z.boolean().default(false),
   floors: z.array(FloorSchema),
+  /** Optional building grouping (migrated in for legacy projects). */
+  buildings: z.array(BuildingSchema).default([]),
 });
 export type Scenario = z.infer<typeof ScenarioSchema>;
 

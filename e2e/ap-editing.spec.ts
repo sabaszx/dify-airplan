@@ -123,7 +123,11 @@ test.describe("AP editing & context menus", () => {
     await page.goto(`/project/${id}`);
     // Right-click the header project name (outside the canvas). Our custom menu
     // must NOT appear there.
-    await page.getByText("Cisco Wi-Fi Planner").first().click({ button: "right" }).catch(() => {});
+    await page
+      .getByText("Cisco Wi-Fi Planner")
+      .first()
+      .click({ button: "right" })
+      .catch(() => {});
     await expect(page.getByTestId("context-menu")).toHaveCount(0);
   });
 });

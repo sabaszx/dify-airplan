@@ -67,7 +67,7 @@ FSPL(dB) = 20*log10(d) + 20*log10(f) + 32.44
 (32.44 is the constant for d in km & f in MHz shifted to meters; equivalently
 using d in m and f in MHz the constant is 20*log10(4π/c) adjusted → we use the
 km form internally by converting d→km. Implementation uses d in meters:
-`FSPL = 20*log10(d_m) + 20*log10(f_MHz) - 27.55`, which is the standard meters/MHz
+`FSPL = 20*log10(d_m) + 20\*log10(f_MHz) - 27.55`, which is the standard meters/MHz
 form. Both are documented in code.)
 
 ### 3.2 Log-distance path loss (used by engine)
@@ -91,10 +91,11 @@ PL(d) = PL(d0) + 10*n*log10(d/d0)      for d >= d0
 `PL(d0)` grows with frequency, so 5 GHz and 6 GHz have higher intrinsic loss than
 2.4 GHz for the same distance — matching physical expectation. Representative
 center frequencies used when a specific channel is not given:
+
 - 2.4 GHz band → 2442 MHz
 - 5 GHz band → 5500 MHz
 - 6 GHz band → 6425 MHz
-When a channel is assigned, its actual center frequency is used.
+  When a channel is assigned, its actual center frequency is used.
 
 **Mandatory-test consequence:** with all else equal, increasing frequency
 increases `PL(d0)` by `20*log10(f2/f1)` dB, so predicted RSSI decreases.
@@ -186,12 +187,13 @@ A grid point passes for a requirement profile when:
 ## 4. Channel Planner (`channel.ts`)
 
 Greedy conflict-minimizing assignment:
+
 1. Load allowed channels for the band from the regulatory domain (DFS toggle applied).
 2. For each AP (ordered by neighbor degree), pick the allowed channel minimizing
    a cost = `coChannelNeighbors*W1 + adjacentOverlap*W2`, where neighbor weight is
    proportional to mutual RSSI.
 3. Record a human-readable reason per assignment. Users may override.
-Never assigns channels outside the regulatory allow-list (mandatory test).
+   Never assigns channels outside the regulatory allow-list (mandatory test).
 
 ## 5. Capacity Estimator (`capacity.ts`)
 
@@ -252,6 +254,7 @@ dark, and high-contrast heatmap options. EN/TH-ready.
 ## B. Command Architecture (`src/store/commands.ts`)
 
 Every canvas mutation is a Command:
+
 ```
 interface Command {
   label: string;                 // human-readable history label
@@ -261,6 +264,7 @@ interface Command {
   invert(state): void;           // undo (or store inverse snapshot)
 }
 ```
+
 A CommandStack provides execute/undo/redo with serialization. Continuous pointer
 movement (dragging a vertex/AP) is coalesced into ONE undoable command via a
 `beginTransient`/`commitTransient` pair, so a drag never floods the history.
@@ -275,7 +279,7 @@ movement (dragging a vertex/AP) is coalesced into ONE undoable command via a
 - `mergeCollinear(polyline, angleEps)`: drop redundant collinear vertices.
 - `polygonCrossing(seg, polygon)`: count/ää detect crossings (for zones).
 - `constrainAngle(from, to, stepDeg)`: snap a segment to common angles.
-All deterministic; each has unit tests.
+  All deterministic; each has unit tests.
 
 ## D. Antenna-Pattern Model (`src/antenna/`)
 
@@ -301,16 +305,18 @@ relative→absolute) preserve the original import and create a derived revision.
 ### D.1 RF-engine use of patterns (`src/antenna/gain.ts`)
 
 1. vector AP→point in world; 2. transform into antenna local frame using AP
-rotation, mounting orientation, and downtilt; 3. derive azimuth φ and elevation
-θ; 4. select/interpolate the frequency pattern nearest the radio channel; 5.
-interpolate az-cut gain `Ga(φ)` and el-cut gain `Ge(θ)` using circular
-interpolation across 0/360; 6. combine cuts.
+   rotation, mounting orientation, and downtilt; 3. derive azimuth φ and elevation
+   θ; 4. select/interpolate the frequency pattern nearest the radio channel; 5.
+   interpolate az-cut gain `Ga(φ)` and el-cut gain `Ge(θ)` using circular
+   interpolation across 0/360; 6. combine cuts.
 
 **Documented cut-combination approximation (MVP):** with only separate az/el
 cuts, we approximate the 3D gain as
+
 ```
 G(φ,θ) ≈ peakGainDbi + (Ga(φ) − peakGainDbi) + (Ge(θ) − peakGainDbi)
 ```
+
 i.e. additive relative-to-peak deltas (a standard, clearly-labeled 2-cut
 approximation). Clamped to [peak − 60 dB, peak]. Sparse patterns are handled by
 nearest-neighbor fallback with a warning flag. If no validated pattern exists,
@@ -334,3 +340,60 @@ its own attenuation.
   in the MVP UI; the data models and engine seams are complete and tested.
 - Playwright E2E remains a documented gap; deterministic Vitest unit tests cover
   geometry, interpolation, coordinate transforms, commands, and pattern import.
+
+---
+
+# Design Addendum — Wall thickness, materials, hierarchy, visibility, 3D, resilience
+
+## Wall thickness (physical, separate from visual & attenuation)
+
+Stored in meters (`Wall.thicknessM`); unit-aware I/O via `src/lib/thickness.ts`
+(mm/cm/m/in/ft). Resize alignment (center/left/right) via
+`src/geometry/thick-wall.ts` (`segmentRect`). Attenuation only depends on
+thickness when the material's model is `per-thickness`/`base-plus-thickness`
+(`src/rf/attenuation.ts`), applied over the in-material path length; `fixed`
+materials are counted once per crossing. Editing goes through the command store
+(undoable, bulk-capable) in `WallProperties.tsx`.
+
+## Material library (`src/domain/material-library.ts`)
+
+CRUD + validation + versioning + JSON import/export. Attenuation entered in dB
+per technology/frequency (`AttenuationSample`). Validation rejects NaN/Infinity
+and negative loss (unless advanced override), duplicate frequency samples, and
+flags missing source as unverified. Materials carry a `version` and audit stamps;
+projects keep their material set so later library edits do not change existing
+designs silently.
+
+## Floor hierarchy (`src/domain/hierarchy.ts`)
+
+Area/Site optional; Building/Floor explicit (`BuildingSchema`, `Scenario.buildings`,
+`Floor.sortOrder/floorNumber/baseElevationM/floorToFloorM/archived`). Ordering is
+explicit (sortOrder → elevation → floorNumber), never string sort. Add/duplicate/
+archive/restore/delete/reorder/move operations are immutable transforms applied
+via the command store. Delete is refused for report-referenced or last floors.
+
+## Technology visibility (`src/lib/layer-visibility.ts`)
+
+Independent per-technology states (hidden/devices/devices+analysis/analysis-only),
+persisted per view (localStorage). Gates device icons and analysis overlays in
+both 2D (`DesignCanvas.showApDevices` + grid gating) and 3D; never mutates devices
+or simulation config. Distinct accessible symbols (▲ Wi-Fi, ◆ BLE, ⬢ UWB).
+
+## 3D view (`src/3d/`, `src/components/workspace/View3D.tsx`)
+
+Geometry is DERIVED from the 2D domain (`buildScene3D`) — no separate 3D model.
+Walls extrude by physical thickness + height; floors stack at real elevations
+(world XY → three XZ, height → Y). Three.js + R3F are dynamically imported
+(`ssr:false`) so the 2D bundle is unaffected. A WebGL capability check plus an
+`ErrorBoundary` guarantee a 3D failure never crashes the 2D editor. Modes:
+3D Floor / 3D Building / Split (with selection sync). 3D signal volumes are
+labeled conceptual, not measured RF.
+
+## Client resilience (override §7)
+
+Root cause of the prior client exception: `useSearchParams()` used without a
+`<Suspense>` boundary in the report route, plus no error boundaries. Fixed by
+wrapping the search-params reader in `<Suspense>`, adding route-level `error.tsx`
+(project + report), a `global-error.tsx`, and a reusable `ErrorBoundary`, and by
+validating persisted state at the storage boundary (`loadValidatedProject` +
+`migrateProject`) so malformed/legacy data yields a localized error.

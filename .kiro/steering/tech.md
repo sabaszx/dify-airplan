@@ -13,6 +13,7 @@ inclusion: always
 - Tooling: ESLint (next/core-web-vitals), Prettier, `tsc --noEmit`.
 
 ## Conventions
+
 - SI units internally (meters, dBm, GHz); convert only for display.
 - Real-world meter coordinates for all objects; pixels are a render transform.
 - Named exports; `@/*` path alias to `src/*`.
@@ -20,6 +21,7 @@ inclusion: always
 - No secrets in source. Read config via `src/lib/env.ts` (Zod-validated).
 
 ## Commands
+
 - Dev: `npm run dev` · Build: `npm run build` · Start: `npm run start`
 - Verify: `npm run typecheck && npm run lint && npm test`
 - E2E: `npx playwright install chromium && npm run test:e2e`
