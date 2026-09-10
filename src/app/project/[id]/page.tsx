@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { localProjectStore } from "@/lib/storage";
+import { loadValidatedProject } from "@/lib/load-project";
 import { useEditor, activeScenario, activeFloor, type Tool } from "@/store/editor";
 import { createAccessPoint, createScenario, createFloor, uid } from "@/domain/factory";
 import type { AccessPoint, Wall } from "@/domain/model";
@@ -14,6 +15,28 @@ import { runSimulation } from "@/workers/client";
 import { DesignCanvas } from "@/components/workspace/DesignCanvas";
 import { ApLibrary } from "@/components/workspace/ApLibrary";
 import { ApProperties } from "@/components/workspace/ApProperties";
+import { WallProperties } from "@/components/workspace/WallProperties";
+import { MaterialLibraryPanel } from "@/components/workspace/MaterialLibraryPanel";
+import { HierarchyPanel, type HierarchyActions } from "@/components/workspace/HierarchyPanel";
+import { LayerPanel } from "@/components/workspace/LayerPanel";
+import { View3D } from "@/components/workspace/View3D";
+import {
+  type LayerVisibility,
+  DEFAULT_LAYER_VISIBILITY,
+  loadLayerVisibility,
+  saveLayerVisibility,
+  showsDevices,
+  showsAnalysis,
+} from "@/lib/layer-visibility";
+import {
+  addFloor as hAddFloor,
+  archiveFloor as hArchiveFloor,
+  restoreFloor as hRestoreFloor,
+  deleteFloor as hDeleteFloor,
+  reorderFloors as hReorderFloors,
+  addBuilding as hAddBuilding,
+  orderedFloors,
+} from "@/domain/hierarchy";
 import { PatternImportPanel } from "@/components/antenna/PatternImportPanel";
 import { NavRail, type Workspace } from "@/components/shell/NavRail";
 import { BottomToolbar } from "@/components/shell/BottomToolbar";
@@ -129,18 +152,46 @@ export default function WorkspacePage() {
     toModel: string;
     summary: CompatibilitySummary;
   } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [wallAlignment, setWallAlignment] = useState<"center" | "left" | "right">("center");
+  const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
+  const [viewMode, setViewMode] = useState<"2d" | "3d" | "split">("2d");
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const p = await localProjectStore.get(id);
-      if (p) loadProject(p);
+      const res = await loadValidatedProject(id);
+      if (cancelled) return;
+      if (res.ok) {
+        loadProject(res.project);
+        setLoadError(null);
+      } else {
+        setLoadError(
+          res.reason === "not-found"
+            ? "This project was not found. It may have been deleted."
+            : "This project could not be opened: its stored data is invalid or from an unsupported version.",
+        );
+      }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [id, loadProject]);
 
   // Apply the default heatmap palette on mount.
   useEffect(() => {
     setPalette(palette);
   }, [palette]);
+
+  // Load persisted per-view layer visibility on mount.
+  useEffect(() => {
+    setLayerVisibility(loadLayerVisibility());
+  }, []);
+
+  function updateLayerVisibility(next: LayerVisibility) {
+    setLayerVisibility(next);
+    saveLayerVisibility(next);
+  }
 
   // Sync tool selection into the store's Tool enum (drawing tools).
   useEffect(() => {
@@ -230,9 +281,13 @@ export default function WorkspacePage() {
         // Split into pieces when the wall has openings so RF applies the
         // opening's own (lower) attenuation across its span.
         pieces: w.openings.length > 0 ? wallPieces(w, attenuationDb) : undefined,
+        // Pass the full material + alignment so thickness-dependent attenuation
+        // models use the in-material path length. Fixed models remain once-per-crossing.
+        material: mat,
+        alignment: wallAlignment,
       };
     });
-  }, [project, activeFloorId]);
+  }, [project, activeFloorId, wallAlignment]);
 
   // Point inspector on hover.
   useEffect(() => {
@@ -240,6 +295,16 @@ export default function WorkspacePage() {
     setInspect(computePoint(cursor, band, engineAps(), engineWalls(), DEFAULT_ENGINE_CONFIG));
   }, [cursor, band, project, engineAps, engineWalls]);
 
+  if (loadError) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center text-base-muted">
+        <p className="max-w-md">{loadError}</p>
+        <Link href="/" className="btn">
+          Back to projects
+        </Link>
+      </div>
+    );
+  }
   if (!project) {
     return (
       <div className="flex h-screen items-center justify-center text-base-muted">
@@ -251,6 +316,8 @@ export default function WorkspacePage() {
   const scn = activeScenario(project);
   const floor = activeFloor(project, activeFloorId);
   const selectedAp = floor?.accessPoints.find((a) => a.id === selectedIds[0]) ?? null;
+  const selectedWalls = floor?.walls.filter((w) => selectedIds.includes(w.id)) ?? [];
+  const selectedWall = selectedWalls[0] ?? null;
 
   function floorExtentMeters(): { w: number; h: number } {
     const mpp = floor?.plan?.metersPerPixel ?? 0.02;
@@ -623,6 +690,113 @@ export default function WorkspacePage() {
     push(`Replaced model, kept location`, "success");
   }
 
+  function updateWall(mutate: (w: Wall) => void, opts?: { bulk?: boolean }) {
+    if (!floor) return;
+    const ids = opts?.bulk ? selectedIds : selectedWall ? [selectedWall.id] : [];
+    if (ids.length === 0) return;
+    update((p) => {
+      const f = activeScenario(p).floors.find((x) => x.id === floor.id);
+      if (!f) return;
+      for (const w of f.walls) {
+        if (ids.includes(w.id)) mutate(w);
+      }
+    });
+    setGrid(null);
+  }
+
+  function duplicateSelectedWall() {
+    if (!floor || !selectedWall) return;
+    const copy: Wall = {
+      ...JSON.parse(JSON.stringify(selectedWall)),
+      id: uid("wall"),
+      polyline: selectedWall.polyline.map((pt) => ({ x: pt.x + 1, y: pt.y + 1 })),
+    };
+    update((p) => {
+      const f = activeScenario(p).floors.find((x) => x.id === floor.id);
+      f?.walls.push(copy);
+    });
+    setSelection([copy.id]);
+    setGrid(null);
+  }
+
+  // ---- floor hierarchy actions (immutable ops via the command store) ----
+  const hierarchyActions: HierarchyActions = {
+    onOpenFloor: (floorId) => setActiveFloor(floorId),
+    onAddFloor: (buildingId, position) =>
+      update((p) => {
+        const s = activeScenario(p);
+        Object.assign(s, hAddFloor(s, { buildingId, position }));
+      }),
+    onAddFloorRelative: (floorId, position) =>
+      update((p) => {
+        const s = activeScenario(p);
+        Object.assign(s, hAddFloor(s, { relativeToFloorId: floorId, position }));
+      }),
+    onDuplicateFloor: (floorId) =>
+      update((p) => {
+        const s = activeScenario(p);
+        Object.assign(s, hAddFloor(s, { duplicateFromFloorId: floorId }));
+      }),
+    onRenameFloor: (floorId, name) =>
+      update((p) => {
+        const f = activeScenario(p).floors.find((x) => x.id === floorId);
+        if (f) f.name = name;
+      }),
+    onArchiveFloor: (floorId) =>
+      update((p) => {
+        const s = activeScenario(p);
+        Object.assign(s, hArchiveFloor(s, floorId));
+      }),
+    onRestoreFloor: (floorId) =>
+      update((p) => {
+        const s = activeScenario(p);
+        Object.assign(s, hRestoreFloor(s, floorId));
+      }),
+    onDeleteFloor: (floorId) => {
+      const target = scn.floors.find((f) => f.id === floorId);
+      // Report references would come from stored report snapshots; none in the
+      // client MVP, so pass an empty referenced list. Confirm destructive op.
+      confirm(
+        `Delete floor "${target?.name ?? floorId}"? This cannot be undone. Archive keeps it recoverable.`,
+      ).then((ok) => {
+        if (!ok) return;
+        let failure: string | null = null;
+        update((p) => {
+          const s = activeScenario(p);
+          const res = hDeleteFloor(s, floorId, []);
+          if (res.ok) Object.assign(s, res.scenario);
+          else failure = res.reason;
+        });
+        if (failure === "last-floor")
+          push("Cannot delete the only floor. Add another first.", "error");
+        else if (failure === "referenced")
+          push("Floor is referenced by a report; archive it instead.", "error");
+        else {
+          if (activeFloorId === floorId) {
+            const next = orderedFloors(scn).find((f) => f.id !== floorId);
+            if (next) setActiveFloor(next.id);
+          }
+          push("Floor deleted");
+        }
+      });
+    },
+    onReorderFloor: (floorId, direction) =>
+      update((p) => {
+        const s = activeScenario(p);
+        const ids = orderedFloors(s).map((f) => f.id);
+        const i = ids.indexOf(floorId);
+        const j = direction === "up" ? i - 1 : i + 1;
+        if (i < 0 || j < 0 || j >= ids.length) return;
+        [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+        Object.assign(s, hReorderFloors(s, ids));
+      }),
+    onAddBuilding: () =>
+      update((p) => {
+        const s = activeScenario(p);
+        Object.assign(s, hAddBuilding(s, `Building ${s.buildings.length + 1}`));
+      }),
+  };
+
   function duplicateSelected() {
     if (!floor || !selectedAp) return;
     const copy = createAccessPoint(selectedAp.productId, {
@@ -702,10 +876,12 @@ export default function WorkspacePage() {
   function inspectorTitle(): string {
     if (workspace === "catalog") return "Product catalog";
     if (selectedAp) return "Access point";
+    if (selectedWall) return selectedWalls.length > 1 ? "Walls" : "Wall";
     if (workspace === "analysis") return "Heatmap & analysis";
     if (workspace === "requirements") return "Requirements & capacity";
     if (workspace === "inventory" || workspace === "reports") return "Scenarios, inventory & BOM";
-    if (workspace === "settings") return "Settings & antenna patterns";
+    if (workspace === "settings") return "Settings, materials & patterns";
+    if (workspace === "floorplans" || workspace === "overview") return "Network hierarchy";
     return "Floor & visualization";
   }
 
@@ -733,6 +909,21 @@ export default function WorkspacePage() {
         />
       );
     }
+    if (selectedWall) {
+      return (
+        <WallProperties
+          wall={selectedWall}
+          selectedWalls={selectedWalls}
+          materials={project!.materials}
+          unit="mm"
+          onChange={updateWall}
+          alignment={wallAlignment}
+          onChangeAlignment={setWallAlignment}
+          onDelete={deleteSelected}
+          onDuplicate={duplicateSelectedWall}
+        />
+      );
+    }
     if (workspace === "analysis") {
       return (
         <AnalysisPanel
@@ -755,8 +946,17 @@ export default function WorkspacePage() {
     }
     if (workspace === "settings") {
       return (
-        <div className="space-y-4">
+        <div className="space-y-5">
           <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase text-base-muted">
+              Material library
+            </h3>
+            <MaterialLibraryPanel
+              materials={project!.materials}
+              onSave={(mats) => update((p) => (p.materials = mats))}
+            />
+          </div>
+          <div className="border-t border-base-border pt-4">
             <h3 className="mb-2 text-xs font-semibold uppercase text-base-muted">
               Antenna pattern import
             </h3>
@@ -791,6 +991,13 @@ export default function WorkspacePage() {
             setGrid(null);
           }}
         />
+      );
+    }
+    if (workspace === "floorplans" || workspace === "overview") {
+      return (
+        <div className="space-y-4">
+          <HierarchyPanel scenario={scn} activeFloorId={activeFloorId} actions={hierarchyActions} />
+        </div>
       );
     }
     // Default: floor + visualization settings.
@@ -959,6 +1166,23 @@ export default function WorkspacePage() {
         >
           + Floor
         </button>
+        <div
+          className="flex items-center gap-0.5 rounded-md border border-base-border p-0.5"
+          role="group"
+          aria-label="View mode"
+        >
+          {(["2d", "3d", "split"] as const).map((m) => (
+            <button
+              key={m}
+              className={`rounded px-2 py-0.5 text-xs uppercase ${viewMode === m ? "bg-accent text-white" : "text-base-muted hover:text-base-text"}`}
+              aria-pressed={viewMode === m}
+              onClick={() => setViewMode(m)}
+              data-testid={`view-${m}`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
         <select
           className="input !w-auto !py-1"
           value={project.activeScenarioId}
@@ -1005,179 +1229,249 @@ export default function WorkspacePage() {
         {/* B. Left nav rail */}
         <NavRail active={workspace} onChange={setWorkspace} />
 
-        {/* C. Central canvas */}
-        <section className="relative min-w-0 flex-1">
-          {!floor?.plan ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-base-muted">
-              <p>No floor plan for {floor?.name}.</p>
-              <label className="btn btn-primary cursor-pointer">
-                Upload PNG / JPEG / SVG
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/png,image/jpeg,image/svg+xml"
-                  onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])}
-                />
-              </label>
-              <p className="max-w-sm text-center text-xs">
-                PDF import requires rasterization (documented limitation — upload a PNG/JPEG of the
-                page).
-              </p>
-            </div>
-          ) : (
-            <DesignCanvas
-              floor={floor}
-              materials={project.materials}
-              tool={toolId}
-              activeMaterialId={activeMaterialId}
-              pinContinuous={pinContinuous}
-              selectedIds={selectedIds}
-              grid={overlayOff ? null : grid}
-              heatmapMode={heatmapMode}
-              heatmapOpacity={heatmapOpacity}
-              showGrid={showGrid}
-              showApLabels={showApLabels}
-              onSelect={setSelection}
-              onPlaceAp={placeAp}
-              onCommitWall={commitWall}
-              onCalibrate={calibrate}
-              onMoveApTransient={moveApTransient}
-              onCursor={setCursor}
-              onViewport={(v) => (vpRef.current = v)}
-              onExitTool={() => setToolId("select")}
-              onMoveWallVertex={moveWallVertex}
-              onTranslateWall={translateWall}
-              onInsertWallVertex={insertWallVertex}
-              onRemoveWallVertex={removeWallVertex}
-              onAddOpening={addOpening}
-              onContextMenu={handleContextMenu}
-              onEditAp={(apId) => openApEditor(apId, "properties")}
-              floorPlanOpacity={floorPlanOpacity}
-              apIconSize={iconSize}
+        {/* C. Central canvas — 2D, 3D, or split. 3D is derived from the same data. */}
+        {viewMode === "3d" ? (
+          <section className="relative min-w-0 flex-1">
+            <View3D
+              scenario={scn}
+              activeFloorId={activeFloorId}
+              layerVisibility={layerVisibility}
+              onSelectFloor={setActiveFloor}
             />
-          )}
+          </section>
+        ) : viewMode === "split" ? (
+          <section className="flex min-w-0 flex-1">
+            <div className="relative min-w-0 flex-1 border-r border-base-border">
+              {floor?.plan ? (
+                <DesignCanvas
+                  floor={floor}
+                  materials={project.materials}
+                  tool={toolId}
+                  activeMaterialId={activeMaterialId}
+                  pinContinuous={pinContinuous}
+                  selectedIds={selectedIds}
+                  grid={overlayOff || !showsAnalysis(layerVisibility, "WIFI") ? null : grid}
+                  heatmapMode={heatmapMode}
+                  heatmapOpacity={heatmapOpacity}
+                  showGrid={showGrid}
+                  showApLabels={showApLabels}
+                  showApDevices={showsDevices(layerVisibility, "WIFI")}
+                  onSelect={setSelection}
+                  onPlaceAp={placeAp}
+                  onCommitWall={commitWall}
+                  onCalibrate={calibrate}
+                  onMoveApTransient={moveApTransient}
+                  onCursor={setCursor}
+                  onViewport={(v) => (vpRef.current = v)}
+                  onExitTool={() => setToolId("select")}
+                  onMoveWallVertex={moveWallVertex}
+                  onTranslateWall={translateWall}
+                  onInsertWallVertex={insertWallVertex}
+                  onRemoveWallVertex={removeWallVertex}
+                  onAddOpening={addOpening}
+                  onContextMenu={handleContextMenu}
+                  onEditAp={(apId) => openApEditor(apId, "properties")}
+                  floorPlanOpacity={floorPlanOpacity}
+                  apIconSize={iconSize}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-base-muted">
+                  Upload a floor plan to edit in 2D.
+                </div>
+              )}
+            </div>
+            <div className="relative min-w-0 flex-1">
+              <View3D
+                scenario={scn}
+                activeFloorId={activeFloorId}
+                layerVisibility={layerVisibility}
+                onSelectFloor={setActiveFloor}
+              />
+            </div>
+          </section>
+        ) : (
+          <section className="relative min-w-0 flex-1">
+            {!floor?.plan ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-base-muted">
+                <p>No floor plan for {floor?.name}.</p>
+                <label className="btn btn-primary cursor-pointer">
+                  Upload PNG / JPEG / SVG
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/png,image/jpeg,image/svg+xml"
+                    onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])}
+                  />
+                </label>
+                <p className="max-w-sm text-center text-xs">
+                  PDF import requires rasterization (documented limitation — upload a PNG/JPEG of
+                  the page).
+                </p>
+              </div>
+            ) : (
+              <DesignCanvas
+                floor={floor}
+                materials={project.materials}
+                tool={toolId}
+                activeMaterialId={activeMaterialId}
+                pinContinuous={pinContinuous}
+                selectedIds={selectedIds}
+                grid={overlayOff || !showsAnalysis(layerVisibility, "WIFI") ? null : grid}
+                heatmapMode={heatmapMode}
+                heatmapOpacity={heatmapOpacity}
+                showGrid={showGrid}
+                showApLabels={showApLabels}
+                showApDevices={showsDevices(layerVisibility, "WIFI")}
+                onSelect={setSelection}
+                onPlaceAp={placeAp}
+                onCommitWall={commitWall}
+                onCalibrate={calibrate}
+                onMoveApTransient={moveApTransient}
+                onCursor={setCursor}
+                onViewport={(v) => (vpRef.current = v)}
+                onExitTool={() => setToolId("select")}
+                onMoveWallVertex={moveWallVertex}
+                onTranslateWall={translateWall}
+                onInsertWallVertex={insertWallVertex}
+                onRemoveWallVertex={removeWallVertex}
+                onAddOpening={addOpening}
+                onContextMenu={handleContextMenu}
+                onEditAp={(apId) => openApEditor(apId, "properties")}
+                floorPlanOpacity={floorPlanOpacity}
+                apIconSize={iconSize}
+              />
+            )}
 
-          {/* Simulation controls (top-right float) */}
-          <div className="absolute right-3 top-3 flex items-center gap-2 rounded-md border border-base-border bg-base-panel/90 px-2 py-1 text-xs">
-            {(["2.4", "5", "6"] as Band[]).map((b) => (
-              <button
-                key={b}
-                className={`rounded px-2 py-0.5 ${band === b ? "bg-accent text-white" : "text-base-muted hover:text-base-text"}`}
-                onClick={() => {
+            {/* Simulation controls (top-right float) */}
+            <div className="absolute right-3 top-3 flex items-center gap-2 rounded-md border border-base-border bg-base-panel/90 px-2 py-1 text-xs">
+              {(["2.4", "5", "6"] as Band[]).map((b) => (
+                <button
+                  key={b}
+                  className={`rounded px-2 py-0.5 ${band === b ? "bg-accent text-white" : "text-base-muted hover:text-base-text"}`}
+                  onClick={() => {
+                    setBand(b);
+                    setGrid(null);
+                  }}
+                >
+                  {b}
+                </button>
+              ))}
+              <select
+                className="input !w-auto !py-0.5 !text-xs"
+                value={resMode}
+                onChange={(e) => setResMode(e.target.value as keyof typeof RES_MODES)}
+              >
+                <option value="draft">Draft</option>
+                <option value="standard">Standard</option>
+                <option value="high">High</option>
+              </select>
+              {simProgress === null ? (
+                <button className="btn btn-primary !py-0.5 !text-xs" onClick={simulate}>
+                  Simulate
+                </button>
+              ) : (
+                <button className="btn !py-0.5 !text-xs" onClick={() => cancelRef.current()}>
+                  Cancel {Math.round(simProgress * 100)}%
+                </button>
+              )}
+            </div>
+
+            {/* Floating analysis-mode tabs (top-center) */}
+            {floor?.plan && (
+              <ModeTabs
+                active={overlayOff ? "off" : heatmapMode}
+                onChange={(m) => {
+                  if (m === "off") {
+                    setOverlayOff(true);
+                  } else {
+                    setOverlayOff(false);
+                    setHeatmapMode(m);
+                  }
+                }}
+              />
+            )}
+
+            {/* Floating visualization panel (top-left) */}
+            {floor?.plan && (
+              <VisualizationPanel
+                settings={{
+                  coverageOpacity: heatmapOpacity,
+                  wallOpacity,
+                  floorPlanOpacity,
+                  showApNames: showApLabels,
+                  showChannels,
+                  showGrid,
+                  iconSize,
+                  palette,
+                }}
+                onChange={(next: Partial<VizSettings>) => {
+                  if (next.coverageOpacity !== undefined) setHeatmapOpacity(next.coverageOpacity);
+                  if (next.wallOpacity !== undefined) setWallOpacity(next.wallOpacity);
+                  if (next.floorPlanOpacity !== undefined)
+                    setFloorPlanOpacity(next.floorPlanOpacity);
+                  if (next.showApNames !== undefined) setShowApLabels(next.showApNames);
+                  if (next.showChannels !== undefined) setShowChannels(next.showChannels);
+                  if (next.showGrid !== undefined) setShowGrid(next.showGrid);
+                  if (next.iconSize !== undefined) setIconSize(next.iconSize);
+                  if (next.palette !== undefined) {
+                    setPaletteState(next.palette);
+                    setPalette(next.palette);
+                  }
+                }}
+              />
+            )}
+
+            {/* Floating technology-layer visibility controls (top-right) */}
+            {floor?.plan && (
+              <LayerPanel visibility={layerVisibility} onChange={updateLayerVisibility} />
+            )}
+
+            {/* Bottom-right signal legend with band toggles */}
+            {floor?.plan && !overlayOff && (
+              <SignalLegend
+                mode={heatmapMode}
+                band={band}
+                onBand={(b) => {
                   setBand(b);
                   setGrid(null);
                 }}
-              >
-                {b}
-              </button>
-            ))}
-            <select
-              className="input !w-auto !py-0.5 !text-xs"
-              value={resMode}
-              onChange={(e) => setResMode(e.target.value as keyof typeof RES_MODES)}
-            >
-              <option value="draft">Draft</option>
-              <option value="standard">Standard</option>
-              <option value="high">High</option>
-            </select>
-            {simProgress === null ? (
-              <button className="btn btn-primary !py-0.5 !text-xs" onClick={simulate}>
-                Simulate
-              </button>
-            ) : (
-              <button className="btn !py-0.5 !text-xs" onClick={() => cancelRef.current()}>
-                Cancel {Math.round(simProgress * 100)}%
-              </button>
+              />
             )}
-          </div>
 
-          {/* Floating analysis-mode tabs (top-center) */}
-          {floor?.plan && (
-            <ModeTabs
-              active={overlayOff ? "off" : heatmapMode}
-              onChange={(m) => {
-                if (m === "off") {
-                  setOverlayOff(true);
-                } else {
-                  setOverlayOff(false);
-                  setHeatmapMode(m);
-                }
-              }}
+            {/* D. Floating bottom toolbar */}
+            <BottomToolbar
+              active={toolId}
+              onSelect={setToolId}
+              pinContinuous={pinContinuous}
+              onTogglePin={() => setPinContinuous((v) => !v)}
+              contextual={contextual}
             />
-          )}
 
-          {/* Floating visualization panel (top-left) */}
-          {floor?.plan && (
-            <VisualizationPanel
-              settings={{
-                coverageOpacity: heatmapOpacity,
-                wallOpacity,
-                floorPlanOpacity,
-                showApNames: showApLabels,
-                showChannels,
-                showGrid,
-                iconSize,
-                palette,
-              }}
-              onChange={(next: Partial<VizSettings>) => {
-                if (next.coverageOpacity !== undefined) setHeatmapOpacity(next.coverageOpacity);
-                if (next.wallOpacity !== undefined) setWallOpacity(next.wallOpacity);
-                if (next.floorPlanOpacity !== undefined) setFloorPlanOpacity(next.floorPlanOpacity);
-                if (next.showApNames !== undefined) setShowApLabels(next.showApNames);
-                if (next.showChannels !== undefined) setShowChannels(next.showChannels);
-                if (next.showGrid !== undefined) setShowGrid(next.showGrid);
-                if (next.iconSize !== undefined) setIconSize(next.iconSize);
-                if (next.palette !== undefined) {
-                  setPaletteState(next.palette);
-                  setPalette(next.palette);
-                }
-              }}
-            />
-          )}
-
-          {/* Bottom-right signal legend with band toggles */}
-          {floor?.plan && !overlayOff && (
-            <SignalLegend
-              mode={heatmapMode}
-              band={band}
-              onBand={(b) => {
-                setBand(b);
-                setGrid(null);
-              }}
-            />
-          )}
-
-          {/* D. Floating bottom toolbar */}
-          <BottomToolbar
-            active={toolId}
-            onSelect={setToolId}
-            pinContinuous={pinContinuous}
-            onTogglePin={() => setPinContinuous((v) => !v)}
-            contextual={contextual}
-          />
-
-          {/* Bottom status bar */}
-          <div className="absolute bottom-0 left-0 right-0 flex items-center gap-4 border-t border-base-border bg-base-panel px-3 py-1 text-[11px] text-base-muted">
-            <span>Cursor: {cursor ? `${cursor.x.toFixed(2)}, ${cursor.y.toFixed(2)} m` : "—"}</span>
-            <span>Zoom: {(vpRef.current.zoom * 100).toFixed(0)}%</span>
-            <span>Band: {band} GHz</span>
-            <span>Scale: {(floor?.plan?.metersPerPixel ?? 0).toFixed(4)} m/px</span>
-            <span>
-              {simProgress !== null
-                ? `Simulating ${Math.round(simProgress * 100)}%`
-                : grid
-                  ? "Simulated"
-                  : "Not simulated"}
-            </span>
-            {inspect && cursor && (
-              <span className="ml-auto text-base-text">
-                RSSI {Number.isFinite(inspect.rssiDbm) ? inspect.rssiDbm : "—"} dBm · SNR{" "}
-                {Number.isFinite(inspect.snrDb) ? inspect.snrDb : "—"} dB · {inspect.mcsLabel} ·{" "}
-                {inspect.usableThroughputMbps} Mbps
+            {/* Bottom status bar */}
+            <div className="absolute bottom-0 left-0 right-0 flex items-center gap-4 border-t border-base-border bg-base-panel px-3 py-1 text-[11px] text-base-muted">
+              <span>
+                Cursor: {cursor ? `${cursor.x.toFixed(2)}, ${cursor.y.toFixed(2)} m` : "—"}
               </span>
-            )}
-          </div>
-        </section>
+              <span>Zoom: {(vpRef.current.zoom * 100).toFixed(0)}%</span>
+              <span>Band: {band} GHz</span>
+              <span>Scale: {(floor?.plan?.metersPerPixel ?? 0).toFixed(4)} m/px</span>
+              <span>
+                {simProgress !== null
+                  ? `Simulating ${Math.round(simProgress * 100)}%`
+                  : grid
+                    ? "Simulated"
+                    : "Not simulated"}
+              </span>
+              {inspect && cursor && (
+                <span className="ml-auto text-base-text">
+                  RSSI {Number.isFinite(inspect.rssiDbm) ? inspect.rssiDbm : "—"} dBm · SNR{" "}
+                  {Number.isFinite(inspect.snrDb) ? inspect.snrDb : "—"} dB · {inspect.mcsLabel} ·{" "}
+                  {inspect.usableThroughputMbps} Mbps
+                </span>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* E. Floating dockable inspector */}
         <Inspector title={inspectorTitle()} warnings={invWarnings}>

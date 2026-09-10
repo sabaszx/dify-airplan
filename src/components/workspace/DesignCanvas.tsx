@@ -57,6 +57,9 @@ interface Props {
   /** Optional display overrides from the visualization panel. */
   floorPlanOpacity?: number;
   apIconSize?: number;
+  /** When false, AP device icons/labels are hidden (layer visibility). Devices
+   *  are NOT deleted — only their rendering is suppressed. Default true. */
+  showApDevices?: boolean;
 }
 
 export function DesignCanvas(props: Props) {
@@ -87,6 +90,7 @@ export function DesignCanvas(props: Props) {
     onEditAp,
     floorPlanOpacity,
     apIconSize,
+    showApDevices = true,
   } = props;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -332,31 +336,33 @@ export function DesignCanvas(props: Props) {
     }
 
     // Access points + directional beam.
-    for (const ap of floor.accessPoints) {
-      const p = worldToScreen(ap.position.x, ap.position.y, mpp, vp);
-      const selected = selectedIds.includes(ap.id);
-      const directional = ap.antennaOverride ? !ap.antennaOverride.omnidirectional : false;
-      if (directional) {
-        const bw = ((ap.antennaOverride?.beamwidthDeg ?? 65) * Math.PI) / 180;
-        const dir = (ap.rotationDeg * Math.PI) / 180;
-        ctx.fillStyle = "rgba(59,130,246,0.18)";
+    if (showApDevices) {
+      for (const ap of floor.accessPoints) {
+        const p = worldToScreen(ap.position.x, ap.position.y, mpp, vp);
+        const selected = selectedIds.includes(ap.id);
+        const directional = ap.antennaOverride ? !ap.antennaOverride.omnidirectional : false;
+        if (directional) {
+          const bw = ((ap.antennaOverride?.beamwidthDeg ?? 65) * Math.PI) / 180;
+          const dir = (ap.rotationDeg * Math.PI) / 180;
+          ctx.fillStyle = "rgba(59,130,246,0.18)";
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.arc(p.x, p.y, 48, dir - bw / 2, dir + bw / 2);
+          ctx.closePath();
+          ctx.fill();
+        }
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.arc(p.x, p.y, 48, dir - bw / 2, dir + bw / 2);
-        ctx.closePath();
+        ctx.arc(p.x, p.y, apIconSize ?? 9, 0, Math.PI * 2);
+        ctx.fillStyle = selected ? "#f0b429" : "#3b82f6";
         ctx.fill();
-      }
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, apIconSize ?? 9, 0, Math.PI * 2);
-      ctx.fillStyle = selected ? "#f0b429" : "#3b82f6";
-      ctx.fill();
-      ctx.strokeStyle = "#0f1420";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      if (showApLabels) {
-        ctx.fillStyle = "#e6ebf5";
-        ctx.font = "11px ui-sans-serif, system-ui";
-        ctx.fillText(ap.name, p.x + 12, p.y + 4);
+        ctx.strokeStyle = "#0f1420";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        if (showApLabels) {
+          ctx.fillStyle = "#e6ebf5";
+          ctx.font = "11px ui-sans-serif, system-ui";
+          ctx.fillText(ap.name, p.x + 12, p.y + 4);
+        }
       }
     }
   }, [
@@ -374,6 +380,7 @@ export function DesignCanvas(props: Props) {
     mpp,
     floorPlanOpacity,
     apIconSize,
+    showApDevices,
   ]);
 
   useEffect(() => {
