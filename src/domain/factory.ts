@@ -5,6 +5,7 @@ import {
   type Project,
   type Scenario,
   type Floor,
+  type Building,
   type AccessPoint,
   type Radio,
   DEFAULT_MATERIALS,
@@ -26,6 +27,11 @@ export function createFloor(index = 0, name?: string): Floor {
     name: name ?? `Floor ${index + 1}`,
     index,
     ceilingHeightM: 3,
+    floorNumber: index + 1,
+    sortOrder: index,
+    baseElevationM: index * 3.5,
+    floorToFloorM: 3.5,
+    archived: false,
     plan: null,
     walls: [],
     accessPoints: [],
@@ -33,12 +39,23 @@ export function createFloor(index = 0, name?: string): Floor {
   };
 }
 
+export function createBuilding(name: string, floorIds: string[] = []): Building {
+  return { id: uid("building"), name, floorIds, archived: false };
+}
+
 export function createScenario(name: string, floors?: Floor[], isBaseline = false): Scenario {
+  const f = floors ?? [createFloor(0)];
   return {
     id: uid("scn"),
     name,
     isBaseline,
-    floors: floors ?? [createFloor(0)],
+    floors: f,
+    buildings: [
+      createBuilding(
+        "Building 1",
+        f.map((x) => x.id),
+      ),
+    ],
   };
 }
 
