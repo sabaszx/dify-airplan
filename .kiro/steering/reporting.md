@@ -21,6 +21,7 @@ description: Apply when creating or modifying PDF/CSV/JSON reports, BOM, report 
   clipped tables. Render and inspect during testing.
 
 ## Shareable report + immutability (override §8/§9)
+
 - Reports render ONLY from an immutable `ReportSnapshot` (`src/lib/report-snapshot.ts`),
   never from live project data. Updating the catalog, patterns, prices, or the
   project must not change an existing report; the user generates a new revision.

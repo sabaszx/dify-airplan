@@ -23,6 +23,7 @@ src/
 ```
 
 ## Dependency rules
+
 - `domain`, `geometry`, `rf`, `antenna`, `catalog`, `regulatory`, `editor` MUST NOT
   import React or `components/`.
 - `components/` and `app/` may import the pure layers, never the reverse.

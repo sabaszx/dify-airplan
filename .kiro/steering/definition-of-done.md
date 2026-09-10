@@ -5,6 +5,7 @@ inclusion: always
 # Definition of Done
 
 A task/slice is done ONLY when all apply:
+
 - Behavior is implemented (no placeholder controls in completed workflows).
 - Tests added for the behavior; the required tests pass.
 - `npm run typecheck` passes (strict, no errors).

@@ -156,6 +156,7 @@ The app is now a canvas-first design tool with a five-region shell and a
 production-grade wall editor and extensible antenna model.
 
 ### Shell
+
 - Compact global header (48px), left navigation rail (Overview, Floor plans,
   Design, Requirements, Analysis, Inventory/BOM, Reports, Catalog, Settings),
   central design canvas, a floating bottom tool dock, and a floating, resizable,
@@ -164,6 +165,7 @@ production-grade wall editor and extensible antenna model.
   warning levels with symbol+color, material colors, heatmap-safe palette).
 
 ### Continuous wall editor (`src/editor/`)
+
 - Pure, testable drawing state machine: click to add vertices, double-click or
   Enter to finish, Escape to cancel a segment / exit, Backspace to drop the last
   vertex, Shift to constrain angle, Alt to disable snapping, numeric length
@@ -174,16 +176,19 @@ production-grade wall editor and extensible antenna model.
 - Live segment length, total length, and angle render on the canvas.
 
 ### Geometry toolkit (`src/geometry/`)
+
 Framework-independent, meters, configurable tolerance: `segmentIntersection`,
 `pointOnSegment`, `nearestSnap`, `constrainAngle`, `splitPolylineAt`,
 `joinPolylines`, `mergeCollinear`, `polygonCrossings` — all unit-tested.
 
 ### Command architecture (`src/store/commands.ts`)
+
 Every mutation is a command with a label, affected IDs, and invalidation bounds.
 `beginTransient`/`applyTransient`/`commitTransient` coalesce a drag into a single
 undoable entry (verified by test).
 
 ### Extensible antenna-pattern model (`src/antenna/`)
+
 - Zod schema + a JSON Schema mirror (`schema.ts`) with verification states
   (draft/sample/unverified/verified/deprecated/archived) and preserved original
   import payloads for provenance.
@@ -199,12 +204,14 @@ undoable entry (verified by test).
   the intended cache key.
 
 ### New tests (76 total)
+
 Geometry (17), continuous wall drawing + snapping (11), command stack incl. drag
 coalescing (5), antenna import/validation/interpolation/gain (14), and
 pattern-driven directional gain in the engine (2), on top of the earlier RF /
 catalog / export / store suites.
 
 ### Partial / not yet surfaced (documented)
+
 - Full antenna-pattern preview UI (polar plots), the 10-step catalog-onboarding
   wizard, minimap, rulers, and WebGL/tiled heatmap rendering are architected
   (data models + engine seams complete and tested) but only partially exposed in
@@ -219,18 +226,21 @@ catalog / export / store suites.
 ## Iteration 3: Wall editing, openings, antenna preview, and E2E
 
 ### On-canvas wall editing (`src/editor/wall-editing.ts`)
+
 Pure, tested operations wired into `DesignCanvas` with command transient
 coalescing: drag a vertex, drag the whole wall body, double-click a vertex to
 remove it, double-click a segment to insert a vertex. Walls gained `heightM`,
 `bottomElevationM`, and `openings`.
 
 ### Openings
+
 A door/window/archway attaches to a wall at a parametric `(segmentIndex, t)`
 position so it stays fixed relative to the wall when the wall moves or resizes
 (verified by test). The RF engine models an opening as a replacement sub-segment
 with its own (lower) attenuation via `wallPieces` + `WallInput.pieces`.
 
 ### Antenna pattern preview & import UI (`src/components/antenna/`)
+
 - `PolarPlot.tsx`: accessible SVG polar plot (azimuth/elevation cuts) with peak
   marker, rotation, and a text summary.
 - `PatternImportPanel.tsx`: imports native JSON / combined CSV / azimuth CSV /
@@ -240,8 +250,10 @@ with its own (lower) attenuation via `wallPieces` + `WallInput.pieces`.
   characteristics to the selected AP.
 
 ### Playwright E2E (`e2e/`)
+
 `npm run test:e2e` (after `npx playwright install chromium`). Specs cover the
 DoD-critical flows and pass locally:
+
 - Create a project; project persists across reload.
 - Continuous wall drawing (three segments, double-click to finish) without
   reselecting the tool; draw a second wall immediately.
@@ -255,10 +267,12 @@ expression (which React treated as a cleanup function) had been breaking the
 canvas mount.
 
 ### Test totals
+
 88 unit tests (Vitest) + 5 E2E tests (Playwright). `tsc`, `next lint`, and
 `next build` all pass.
 
 ### Still partial / documented
+
 - The pattern editor (edit individual samples, normalize, interpolate, clone,
   compare) and full per-radio pattern storage in the catalog are modeled but not
   fully surfaced in the UI; the Settings panel applies a pattern's directional
@@ -272,11 +286,13 @@ canvas mount.
 ## Iteration 4: AP editing, model change, model-specific patterns, context menus
 
 ### Post-placement AP editing
+
 Every placed AP is editable via double-click, selection + inspector, right-click
 "Edit Access Point", or the AP tabs (Properties / Radios / Pattern). Changes
 update the simulation without recreating the AP.
 
 ### Model change (`src/domain/model-change.ts`)
+
 `computeModelChange` produces a compatibility summary (preserved / converted /
 reset settings, added/removed radios and bands, antenna, regulatory, and
 management differences). `applyModelChange` preserves position, name, asset tag,
@@ -288,6 +304,7 @@ drive the flow. Verified by unit and E2E tests (position preserved, band dropped
 undo restores the previous model).
 
 ### Model-specific antenna patterns (`src/antenna/select.ts`, `library.ts`)
+
 `selectPattern` resolves a pattern through a strict hierarchy — exact SKU → exact
 model → product family (conservative series match) → manufacturer simplified spec
 → explicitly-labeled generic fallback. A fallback is never silent: it always
@@ -298,6 +315,7 @@ tab shows the resolved pattern, verification status, source datasheet link, and
 azimuth/elevation polar plots that rotate with the AP.
 
 ### Provenance (`src/catalog/schema.ts`)
+
 `PatternProvenance` records manufacturer, document title/type, source URL,
 revision, dates, page/figure/table, gain type (absolute vs relative), importer,
 and verification status (draft / sample / extracted-from-datasheet /
@@ -306,6 +324,7 @@ manually-reviewed / manufacturer-verified / deprecated). The AP model carries a
 project's simulation.
 
 ### Object-aware context menus (`src/editor/hit-test.ts`, `context-menu.ts`)
+
 Right-click performs hit-testing and opens a menu specific to the topmost object
 (AP, wall, wall-vertex, opening, requirement zone, background, empty), selecting
 it first. Overlapping objects add "Select Behind" / "Select From List". The menu
@@ -315,6 +334,7 @@ native browser menu still works elsewhere. Shift+F10 and the Context Menu key
 open the same menu.
 
 ### Data model additions (`src/domain/model.ts`)
+
 `AccessPoint` gained `productRevisionId`, `skuId`, `regulatoryProfileId`,
 `orientationAzimuthDegrees`, `orientationDowntiltDegrees`, `antennaAssignments`,
 `modelOverrideWarnings`, `catalogSnapshot`, `locked`, and audit timestamps.
@@ -322,6 +342,7 @@ open the same menu.
 `orientation`, `mountingMode`, `isFallback`, `fallbackReason`, `overrideReason`.
 
 ### Test totals
+
 111 unit tests + 12 Playwright E2E tests. New E2E: double-click opens the editor;
 right-click an AP shows AP actions, a wall shows wall actions; Change Model
 preserves position and is undoable; Shift+F10 opens the menu; the menu stays in
@@ -329,6 +350,7 @@ the viewport; and the native menu still works outside the canvas. `tsc`,
 `next lint`, and `next build` all pass.
 
 ### Still partial / documented
+
 - Advanced pattern-assignment override with a required reason + audit trail is
   modeled (`overrideReason`, `modelOverrideWarnings`) but the override UI is
   minimal; per-radio/per-antenna/per-mounting pattern storage exists in the model
@@ -345,6 +367,7 @@ the viewport; and the native menu still works outside the canvas. `tsc`,
 ## Iteration 5: Kiro config, quality gates, production scaffolding, docs
 
 ### Kiro operating mode
+
 - Steering in `.kiro/steering/`: always-included (product, tech, structure,
   architecture, security, definition-of-done) + auto-inclusion by topic
   (canvas-editor, rf-domain, antenna-patterns, cisco-catalog, reporting, testing,
@@ -359,18 +382,21 @@ the viewport; and the native menu still works outside the canvas. `tsc`,
   privilege). The app never depends on MCP at runtime.
 
 ### Reproducible reporting
+
 `src/lib/report-snapshot.ts` captures every input needed to reproduce a report
 (engine/catalog/project/scenario/pattern revisions, calculation settings, BOM,
 product+pattern provenance, a deep scenario copy, transparency flags). Tested for
 totals-match-scenario and reproducibility after live-data changes.
 
 ### Quality gates (property-based)
+
 `src/**/invariants.property.test.ts` (fast-check, deterministic seeds): distance
 & attenuation monotonicity, circular-interpolation continuity, invalid channels
 never assigned, omni rotation invariance, serialize roundtrip, undo/redo
 equivalence, and organization-boundary isolation.
 
 ### Production scaffolding
+
 Health `/api/health` + readiness `/api/ready` routes; CSP + security headers and
 `output: standalone` in `next.config.mjs`; multi-stage non-root `Dockerfile` with
 a HEALTHCHECK; `.github/workflows/ci.yml` (install→prettier→lint→typecheck→tests
@@ -378,12 +404,14 @@ a HEALTHCHECK; `.github/workflows/ci.yml` (install→prettier→lint→typecheck
 expanded `.env.example`.
 
 ### Documentation
+
 `docs/`: architecture, domain-model, rf-model, antenna-pattern-format,
 cisco-catalog, security, threat-model, mcp-security, testing, reporting,
 deployment, operations, backup-restore, release-checklist, api, user-guide,
 admin-guide, limitations, and ADRs 0001–0004.
 
 ### Verification (this iteration — commands actually executed)
+
 - `npx prettier --check "src/**/*.{ts,tsx}"` → pass (after formatting)
 - `npm run lint` → pass (no warnings)
 - `npm run typecheck` → pass
@@ -394,9 +422,11 @@ admin-guide, limitations, and ADRs 0001–0004.
   environment); Dockerfile + CI `container` job are provided.
 
 ### Production-readiness status (honest)
+
 This build is **NOT production-ready**. Client-persisted MVP; server-side
 authorization, PostgreSQL/Auth.js, signed URLs, and rate limiting are specified
 and modeled but not yet enforced. Integration/API-contract/visual-regression/
 automated-accessibility/security-fuzz suites and the full 29-section PDF report
 are not yet built. See `docs/limitations.md` and `docs/release-checklist.md`.
+
 # dify-airplan

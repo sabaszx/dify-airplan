@@ -3,6 +3,7 @@
 Defined with Zod in `src/domain/model.ts` (coordinates in real-world meters).
 
 ## Entities
+
 - **Organization / User** — tenancy; every project carries `organizationId`.
 - **Project** — customer, location, regulatory domain, units, locale, materials,
   thresholds, scenarios, audit timestamps.
@@ -21,6 +22,7 @@ Defined with Zod in `src/domain/model.ts` (coordinates in real-world meters).
 - **WallMaterial** — per-band attenuation (planning defaults, editable).
 
 ## Revisioning
+
 Product/pattern revisions are immutable; the AP stores a `catalogSnapshot` so a
 later catalog change never silently alters an existing project's simulation.
 Report snapshots embed a deep copy of the scenario for reproducibility.
