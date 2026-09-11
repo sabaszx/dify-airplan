@@ -60,6 +60,9 @@ interface Props {
   /** When false, AP device icons/labels are hidden (layer visibility). Devices
    *  are NOT deleted — only their rendering is suppressed. Default true. */
   showApDevices?: boolean;
+  /** Display cutoff (dBm): heatmap cells below this are hidden. Display-only;
+   *  does not change simulation values. See override §2. */
+  cutoffDbm?: number;
 }
 
 export function DesignCanvas(props: Props) {
@@ -91,6 +94,7 @@ export function DesignCanvas(props: Props) {
     floorPlanOpacity,
     apIconSize,
     showApDevices = true,
+    cutoffDbm,
   } = props;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -217,7 +221,7 @@ export function DesignCanvas(props: Props) {
       for (let r = 0; r < grid.rows; r++) {
         for (let c = 0; c < grid.cols; c++) {
           const res = grid.cells[r * grid.cols + c]!;
-          const color = colorFor(heatmapMode, res);
+          const color = colorFor(heatmapMode, res, cutoffDbm);
           if (!color) continue;
           const p = worldToScreen(
             grid.spec.originM.x + c * cell,
@@ -381,6 +385,7 @@ export function DesignCanvas(props: Props) {
     floorPlanOpacity,
     apIconSize,
     showApDevices,
+    cutoffDbm,
   ]);
 
   useEffect(() => {

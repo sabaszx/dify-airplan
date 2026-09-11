@@ -6,7 +6,7 @@
  * Pure and unit-tested. The snapshot embeds a deep copy of the scenario and the
  * catalog entries actually used, plus revision ids and calculation settings.
  */
-import type { Project, Scenario } from "@/domain/model";
+import type { Project, Scenario, DisplayCutoffPersisted } from "@/domain/model";
 import { getProduct, loadCatalog } from "@/catalog";
 import { selectPattern } from "@/antenna/select";
 import { scenarioBom, scenarioApCount, scenarioFloorCount, type BomLine } from "./scenario-metrics";
@@ -79,6 +79,9 @@ export interface ReportSnapshot {
   materials: MaterialSummary[];
   /** Deep-frozen copy of the scenario so totals never drift from the live data. */
   scenarioSnapshot: Scenario;
+  /** Display-only RSSI cutoff active when the report was generated. Recorded for
+   *  transparency; it does NOT affect any reported totals or pass/fail. */
+  displayCutoff?: DisplayCutoffPersisted;
   /** Flags surfaced in the report for transparency. */
   flags: {
     hasUnverifiedProducts: boolean;
@@ -229,6 +232,7 @@ export function buildReportSnapshot(
     walls,
     materials,
     scenarioSnapshot: JSON.parse(JSON.stringify(scenario)) as Scenario,
+    displayCutoff: scenario.visualization?.displayCutoff,
     flags: {
       hasUnverifiedProducts: products.some((p) => !p.verified),
       hasFallbackPatterns: patterns.some((p) => p.isFallback),

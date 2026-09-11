@@ -12,10 +12,14 @@ export function SignalLegend({
   mode,
   band,
   onBand,
+  cutoffDbm,
 }: {
   mode: HeatmapMode;
   band: Band;
   onBand: (b: Band) => void;
+  /** Active display cutoff (dBm). When set, a note shows that weaker cells are
+   *  hidden. Display-only; does not change any calculated value. */
+  cutoffDbm?: number;
 }) {
   const legend = gradientLegendFor(mode);
 
@@ -56,6 +60,16 @@ export function SignalLegend({
         </div>
       ) : (
         <div className="w-48 text-base-muted">Categorical legend shown on the canvas.</div>
+      )}
+
+      {typeof cutoffDbm === "number" && (
+        <div className="mt-1.5 flex w-48 items-center gap-1.5 border-t border-base-border pt-1.5 text-[10px] text-base-muted">
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-base-border"
+            aria-hidden
+          />
+          <span>Cutoff {cutoffDbm} dBm — weaker areas hidden</span>
+        </div>
       )}
     </div>
   );

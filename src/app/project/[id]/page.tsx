@@ -6,7 +6,7 @@ import Link from "next/link";
 import { localProjectStore } from "@/lib/storage";
 import { loadValidatedProject } from "@/lib/load-project";
 import { useEditor, activeScenario, activeFloor, type Tool } from "@/store/editor";
-import { createAccessPoint, createScenario, createFloor, uid } from "@/domain/factory";
+import { createAccessPoint, createScenario, uid } from "@/domain/factory";
 import type { AccessPoint, Wall } from "@/domain/model";
 import type { ApInput, WallInput, GridResult, GridSpec } from "@/rf/engine";
 import { DEFAULT_ENGINE_CONFIG, computePoint } from "@/rf/engine";
@@ -20,6 +20,15 @@ import { MaterialLibraryPanel } from "@/components/workspace/MaterialLibraryPane
 import { HierarchyPanel, type HierarchyActions } from "@/components/workspace/HierarchyPanel";
 import { LayerPanel } from "@/components/workspace/LayerPanel";
 import { View3D } from "@/components/workspace/View3D";
+import { type DisplayCutoff, DEFAULT_DISPLAY_CUTOFF, cutoffFor } from "@/lib/display-cutoff";
+import { DisplayThresholds } from "@/components/workspace/DisplayThresholds";
+import {
+  type ToolbarMode,
+  DEFAULT_TOOLBAR_MODE,
+  loadToolbarMode,
+  saveToolbarMode,
+  toggleFocusMode,
+} from "@/lib/toolbar-prefs";
 import {
   type LayerVisibility,
   DEFAULT_LAYER_VISIBILITY,
@@ -156,6 +165,8 @@ export default function WorkspacePage() {
   const [wallAlignment, setWallAlignment] = useState<"center" | "left" | "right">("center");
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const [viewMode, setViewMode] = useState<"2d" | "3d" | "split">("2d");
+  const [displayCutoff, setDisplayCutoff] = useState<DisplayCutoff>(DEFAULT_DISPLAY_CUTOFF);
+  const [toolbarMode, setToolbarMode] = useState<ToolbarMode>(DEFAULT_TOOLBAR_MODE);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +176,9 @@ export default function WorkspacePage() {
       if (res.ok) {
         loadProject(res.project);
         setLoadError(null);
+        // Restore persisted display cutoff (does not affect the simulation).
+        const scnCutoff = activeScenario(res.project).visualization?.displayCutoff;
+        if (scnCutoff) setDisplayCutoff({ ...DEFAULT_DISPLAY_CUTOFF, ...scnCutoff });
       } else {
         setLoadError(
           res.reason === "not-found"
@@ -183,14 +197,48 @@ export default function WorkspacePage() {
     setPalette(palette);
   }, [palette]);
 
-  // Load persisted per-view layer visibility on mount.
+  // Load persisted per-view layer visibility + toolbar mode on mount.
   useEffect(() => {
     setLayerVisibility(loadLayerVisibility());
+    setToolbarMode(loadToolbarMode());
   }, []);
 
   function updateLayerVisibility(next: LayerVisibility) {
     setLayerVisibility(next);
     saveLayerVisibility(next);
+  }
+
+  /** Persist the toolbar display mode (expanded/compact/hidden). */
+  function updateToolbarMode(next: ToolbarMode) {
+    setToolbarMode(next);
+    saveToolbarMode(next);
+  }
+
+  /** Update the display cutoff (visualization-only) and persist it on the active
+   *  scenario so it survives reload. Does NOT change the simulation or
+   *  requirements. See override §2. */
+  function updateDisplayCutoff(next: DisplayCutoff) {
+    setDisplayCutoff(next);
+    setGrid((g) => g); // keep grid; cutoff is a display mask, not a recompute
+    update((p) => {
+      const s = activeScenario(p);
+      s.visualization = { ...(s.visualization ?? {}), displayCutoff: next };
+    });
+  }
+
+  /** Explicit, opt-in action: adopt the current display cutoff as the coverage
+   *  data-RSSI requirement. This DOES change requirement pass/fail, so it only
+   *  runs on a deliberate user action (never automatically). See override §2. */
+  function useCutoffAsRequirement(dbm: number) {
+    const ok =
+      typeof window === "undefined" ||
+      window.confirm(
+        `Set the coverage data-RSSI requirement to ${dbm} dBm? This changes pass/fail (not just what is shown).`,
+      );
+    if (!ok) return;
+    update((p) => {
+      p.thresholds.dataRssiDbm = dbm;
+    });
   }
 
   // Sync tool selection into the store's Tool enum (drawing tools).
@@ -223,6 +271,18 @@ export default function WorkspacePage() {
         i: "inspect",
       };
       if (map[e.key.toLowerCase()] && !meta) setToolId(map[e.key.toLowerCase()]!);
+      // Focus mode: F toggles the toolbar in/out of hidden. Never traps because
+      // a restore pill is always shown while hidden (override §4).
+      if (e.key.toLowerCase() === "f" && !meta) {
+        updateToolbarMode(toggleFocusMode(toolbarMode));
+        return;
+      }
+      // Escape always restores a hidden toolbar (defensive against traps); it
+      // never hides the toolbar, so Escape can't strand the user.
+      if (e.key === "Escape" && toolbarMode === "hidden") {
+        updateToolbarMode("expanded");
+        return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length && tag !== "INPUT") {
         deleteSelected();
       }
@@ -230,7 +290,7 @@ export default function WorkspacePage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIds, undo, redo]);
+  }, [selectedIds, undo, redo, toolbarMode]);
 
   const engineAps = useCallback((): ApInput[] => {
     if (!project) return [];
@@ -930,8 +990,11 @@ export default function WorkspacePage() {
           legend={legend}
           heatmapMode={heatmapMode}
           setHeatmapMode={setHeatmapMode}
-          opacity={heatmapOpacity}
-          setOpacity={setHeatmapOpacity}
+          cutoff={displayCutoff}
+          band={band}
+          requirementDbm={project!.thresholds.dataRssiDbm}
+          onCutoffChange={updateDisplayCutoff}
+          onUseAsRequirement={useCutoffAsRequirement}
         />
       );
     }
@@ -1156,16 +1219,10 @@ export default function WorkspacePage() {
             </option>
           ))}
         </select>
-        <button
-          className="btn !py-1 !text-xs"
-          onClick={() =>
-            update((p) =>
-              activeScenario(p).floors.push(createFloor(activeScenario(p).floors.length)),
-            )
-          }
-        >
-          + Floor
-        </button>
+        {/* Floor MANAGEMENT (add/duplicate/archive/delete) lives only in the
+            Floor plans → Hierarchy panel (canonical). The header selector above
+            switches the active floor; it never creates or deletes floors.
+            See design.md consolidation decisions. */}
         <div
           className="flex items-center gap-0.5 rounded-md border border-base-border p-0.5"
           role="group"
@@ -1256,6 +1313,7 @@ export default function WorkspacePage() {
                   showGrid={showGrid}
                   showApLabels={showApLabels}
                   showApDevices={showsDevices(layerVisibility, "WIFI")}
+                  cutoffDbm={cutoffFor(displayCutoff, "WIFI", band)}
                   onSelect={setSelection}
                   onPlaceAp={placeAp}
                   onCommitWall={commitWall}
@@ -1322,6 +1380,7 @@ export default function WorkspacePage() {
                 showGrid={showGrid}
                 showApLabels={showApLabels}
                 showApDevices={showsDevices(layerVisibility, "WIFI")}
+                cutoffDbm={cutoffFor(displayCutoff, "WIFI", band)}
                 onSelect={setSelection}
                 onPlaceAp={placeAp}
                 onCommitWall={commitWall}
@@ -1431,6 +1490,7 @@ export default function WorkspacePage() {
               <SignalLegend
                 mode={heatmapMode}
                 band={band}
+                cutoffDbm={cutoffFor(displayCutoff, "WIFI", band)}
                 onBand={(b) => {
                   setBand(b);
                   setGrid(null);
@@ -1445,6 +1505,8 @@ export default function WorkspacePage() {
               pinContinuous={pinContinuous}
               onTogglePin={() => setPinContinuous((v) => !v)}
               contextual={contextual}
+              mode={toolbarMode}
+              onChangeMode={updateToolbarMode}
             />
 
             {/* Bottom status bar */}
@@ -1524,14 +1586,20 @@ function AnalysisPanel({
   legend,
   heatmapMode,
   setHeatmapMode,
-  opacity,
-  setOpacity,
+  cutoff,
+  band,
+  requirementDbm,
+  onCutoffChange,
+  onUseAsRequirement,
 }: {
   legend: { label: string; color: string }[];
   heatmapMode: HeatmapMode;
   setHeatmapMode: (m: HeatmapMode) => void;
-  opacity: number;
-  setOpacity: (o: number) => void;
+  cutoff: DisplayCutoff;
+  band: Band;
+  requirementDbm?: number;
+  onCutoffChange: (next: DisplayCutoff) => void;
+  onUseAsRequirement: (dbm: number) => void;
 }) {
   return (
     <div className="space-y-3 text-sm">
@@ -1549,18 +1617,19 @@ function AnalysisPanel({
           ))}
         </select>
       </div>
-      <div>
-        <label className="label">Opacity</label>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={opacity}
-          onChange={(e) => setOpacity(Number(e.target.value))}
-          className="w-full"
+
+      {/* Canonical RSSI display cutoff (opacity lives in the Visualization panel). */}
+      <div className="rounded-md border border-base-border p-2">
+        <DisplayThresholds
+          cutoff={cutoff}
+          technology="WIFI"
+          band={band}
+          requirementDbm={requirementDbm}
+          onChange={onCutoffChange}
+          onUseAsRequirement={onUseAsRequirement}
         />
       </div>
+
       <div>
         <label className="label">Legend</label>
         <div className="space-y-1 text-xs">
