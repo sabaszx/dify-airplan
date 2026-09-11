@@ -270,6 +270,23 @@ export const BuildingSchema = z.object({
 });
 export type Building = z.infer<typeof BuildingSchema>;
 
+/** Scenario-level visualization settings. Display-only; does NOT affect the
+ *  simulation or coverage requirements. See override §2.5. Optional + defaulted
+ *  so legacy scenarios remain valid. */
+export const DisplayCutoffSchema = z.object({
+  wifi: z.object({ "2.4": z.number(), "5": z.number(), "6": z.number() }),
+  ble: z.number(),
+  uwb: z.number(),
+  hideBelow: z.boolean().default(true),
+  belowColor: z.string().optional(),
+});
+export type DisplayCutoffPersisted = z.infer<typeof DisplayCutoffSchema>;
+
+export const VisualizationSettingsSchema = z.object({
+  displayCutoff: DisplayCutoffSchema.optional(),
+});
+export type VisualizationSettings = z.infer<typeof VisualizationSettingsSchema>;
+
 export const ScenarioSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -277,6 +294,8 @@ export const ScenarioSchema = z.object({
   floors: z.array(FloorSchema),
   /** Optional building grouping (migrated in for legacy projects). */
   buildings: z.array(BuildingSchema).default([]),
+  /** Optional display-only visualization settings (e.g. RSSI display cutoff). */
+  visualization: VisualizationSettingsSchema.optional(),
 });
 export type Scenario = z.infer<typeof ScenarioSchema>;
 
