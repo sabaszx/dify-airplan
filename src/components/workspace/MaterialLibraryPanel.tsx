@@ -5,14 +5,17 @@ import type { WallMaterial, AttenuationSample } from "@/domain/model";
 import {
   validateMaterial,
   createMaterial,
-  updateMaterial,
   duplicateMaterial,
   archiveMaterial,
   restoreMaterial,
   searchMaterials,
   exportMaterialsJson,
   importMaterialsJson,
+  saveMaterial,
+  canPerform,
+  allowsNegativeLoss,
   type MaterialValidation,
+  type MaterialRole,
 } from "@/domain/material-library";
 import { materialColor } from "@/lib/tokens";
 
@@ -24,15 +27,22 @@ import { materialColor } from "@/lib/tokens";
 interface Props {
   materials: WallMaterial[];
   onSave: (materials: WallMaterial[]) => void;
+  /** Caller's role. Defaults to editor. Viewers get a read-only library. */
+  role?: MaterialRole;
+  /** Editor identity recorded on create (audit trail). */
+  editorId?: string;
 }
 
 const TECHS: AttenuationSample["technology"][] = ["WIFI", "BLE", "UWB"];
 
-export function MaterialLibraryPanel({ materials, onSave }: Props) {
+export function MaterialLibraryPanel({ materials, onSave, role = "editor", editorId }: Props) {
   const [query, setQuery] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
   const [editing, setEditing] = useState<WallMaterial | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const canEdit = canPerform(role, "edit");
+  const canDelete = canPerform(role, "delete");
 
   const filtered = useMemo(
     () => searchMaterials(materials, query, includeArchived),
@@ -48,8 +58,15 @@ export function MaterialLibraryPanel({ materials, onSave }: Props) {
   }
 
   function saveEditing(m: WallMaterial) {
-    const exists = materials.some((x) => x.id === m.id);
-    commit(exists ? materials.map((x) => (x.id === m.id ? m : x)) : [...materials, m]);
+    // Single write path: enforces permission + validation and applies the
+    // correct new-vs-edit revision handling (new = v1, edit = version bump).
+    const res = saveMaterial(materials, m, { role, by: editorId });
+    if (!res.ok) {
+      setError(res.error ?? "Could not save material.");
+      return;
+    }
+    setError(null);
+    commit(res.materials);
     setEditing(null);
   }
 
@@ -68,7 +85,12 @@ export function MaterialLibraryPanel({ materials, onSave }: Props) {
 
   if (editing) {
     return (
-      <MaterialEditor material={editing} onCancel={() => setEditing(null)} onSave={saveEditing} />
+      <MaterialEditor
+        material={editing}
+        allowNegative={allowsNegativeLoss(role)}
+        onCancel={() => setEditing(null)}
+        onSave={saveEditing}
+      />
     );
   }
 
@@ -82,10 +104,29 @@ export function MaterialLibraryPanel({ materials, onSave }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search materials"
         />
-        <button className="btn btn-primary !py-1 !text-xs" onClick={startNew}>
+        <button
+          className="btn btn-primary !py-1 !text-xs"
+          onClick={startNew}
+          disabled={!canEdit}
+          title={canEdit ? "Add a material" : "Your role cannot add materials"}
+          data-testid="add-material"
+        >
           + Add
         </button>
       </div>
+      {!canEdit && (
+        <p className="rounded border border-base-border px-2 py-1 text-[11px] text-base-muted">
+          Read-only: your role ({role}) cannot modify the material library.
+        </p>
+      )}
+      {error && (
+        <p
+          className="rounded border border-red-500/40 px-2 py-1 text-[11px] text-red-300"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
       <label className="flex items-center gap-2 text-xs">
         <input
           type="checkbox"
@@ -124,16 +165,21 @@ export function MaterialLibraryPanel({ materials, onSave }: Props) {
               {m.attenuationSamples?.length ? ` · ${m.attenuationSamples.length} samples` : ""}
             </div>
             <div className="mt-1.5 flex flex-wrap gap-1 text-[11px]">
-              <button className="btn !px-2 !py-0.5" onClick={() => setEditing(m)}>
-                Edit
+              <button
+                className="btn !px-2 !py-0.5"
+                onClick={() => (canEdit ? setEditing(m) : setEditing(m))}
+                title={canEdit ? "Edit material" : "View material (read-only)"}
+              >
+                {canEdit ? "Edit" : "View"}
               </button>
               <button
                 className="btn !px-2 !py-0.5"
+                disabled={!canEdit}
                 onClick={() => commit([...materials, duplicateMaterial(m)])}
               >
                 Duplicate
               </button>
-              {m.archived ? (
+              {!canEdit ? null : m.archived ? (
                 <button
                   className="btn !px-2 !py-0.5"
                   onClick={() =>
@@ -150,6 +196,22 @@ export function MaterialLibraryPanel({ materials, onSave }: Props) {
                   }
                 >
                   Archive
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  className="btn !px-2 !py-0.5 text-red-300"
+                  title="Permanently delete (admin only)"
+                  onClick={() => {
+                    if (
+                      typeof window !== "undefined" &&
+                      !window.confirm(`Permanently delete "${m.name}"? This cannot be undone.`)
+                    )
+                      return;
+                    commit(materials.filter((x) => x.id !== m.id));
+                  }}
+                >
+                  Delete
                 </button>
               )}
             </div>
@@ -193,15 +255,17 @@ export function MaterialLibraryPanel({ materials, onSave }: Props) {
 
 function MaterialEditor({
   material,
+  allowNegative = false,
   onCancel,
   onSave,
 }: {
   material: WallMaterial;
+  allowNegative?: boolean;
   onCancel: () => void;
   onSave: (m: WallMaterial) => void;
 }) {
   const [draft, setDraft] = useState<WallMaterial>(material);
-  const validation: MaterialValidation = validateMaterial(draft);
+  const validation: MaterialValidation = validateMaterial(draft, { allowNegative });
 
   function set<K extends keyof WallMaterial>(key: K, value: WallMaterial[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -360,7 +424,7 @@ function MaterialEditor({
           className="btn btn-primary flex-1"
           disabled={!validation.ok}
           data-testid="save-material"
-          onClick={() => onSave(updateMaterial(draft, draft))}
+          onClick={() => onSave(draft)}
         >
           Save
         </button>

@@ -282,3 +282,91 @@ export function importMaterialsJson(text: string): ImportResult {
   });
   return { materials: out, errors };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Permission model (pure)                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Roles that govern who may change the material library. Framework-independent
+ *  so it can be enforced client-side now and server-side once the API is wired
+ *  (see security steering). Original code. */
+export type MaterialRole = "viewer" | "editor" | "admin";
+
+export type MaterialAction = "create" | "edit" | "duplicate" | "archive" | "delete" | "import";
+
+/** Capability check: which actions a role may perform. Deleting (hard removal)
+ *  and the negative-loss override are admin-only; editors can create/edit/
+ *  duplicate/archive/import; viewers are read-only. */
+export function canPerform(role: MaterialRole, action: MaterialAction): boolean {
+  switch (role) {
+    case "admin":
+      return true;
+    case "editor":
+      return action !== "delete";
+    case "viewer":
+      return false;
+    default:
+      return false;
+  }
+}
+
+/** Only admins may enter the advanced negative-loss (gain) override. */
+export function allowsNegativeLoss(role: MaterialRole): boolean {
+  return role === "admin";
+}
+
+/* -------------------------------------------------------------------------- */
+/* Save helper (new vs edit) with authorization + validation                  */
+/* -------------------------------------------------------------------------- */
+
+export interface SaveMaterialOptions {
+  role?: MaterialRole;
+  by?: string;
+  now?: string;
+}
+
+export interface SaveMaterialResult {
+  ok: boolean;
+  materials: WallMaterial[];
+  error?: string;
+  validation?: MaterialValidation;
+}
+
+/**
+ * Insert or update a material in a library array. Enforces role permission,
+ * validates dB values, and bumps the revision ONLY for edits to an existing
+ * record (a brand-new material stays at version 1). Returns a new array; never
+ * mutates the input. This is the single write path the UI and any future API
+ * should call. See override §5.
+ */
+export function saveMaterial(
+  materials: WallMaterial[],
+  draft: WallMaterial,
+  opts: SaveMaterialOptions = {},
+): SaveMaterialResult {
+  const role = opts.role ?? "editor";
+  const now = opts.now ?? new Date().toISOString();
+  const exists = materials.some((m) => m.id === draft.id);
+  const action: MaterialAction = exists ? "edit" : "create";
+
+  if (!canPerform(role, action)) {
+    return { ok: false, materials, error: `Your role (${role}) cannot ${action} materials.` };
+  }
+
+  const validation = validateMaterial(draft, { allowNegative: allowsNegativeLoss(role) });
+  if (!validation.ok) {
+    return { ok: false, materials, error: "Material has validation errors.", validation };
+  }
+
+  if (!exists) {
+    // New record: stamp author/timestamps once, keep version 1.
+    const created = createMaterial(draft, now, opts.by ?? draft.createdBy ?? "user");
+    return { ok: true, materials: [...materials, created], validation };
+  }
+
+  // Existing record: bump the revision and record the editor/time.
+  const next = materials.map((m) =>
+    m.id === draft.id ? updateMaterial(m, { ...draft, createdBy: m.createdBy }, now) : m,
+  );
+  return { ok: true, materials: next, validation };
+}
