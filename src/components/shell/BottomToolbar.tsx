@@ -1,6 +1,7 @@
 "use client";
 
 import type { Tool } from "@/store/editor";
+import { type ToolbarMode, cycleToolbarMode, toolbarModeLabel } from "@/lib/toolbar-prefs";
 
 interface ToolDef {
   id: Tool | "opening" | "inspect";
@@ -28,13 +29,39 @@ export function BottomToolbar({
   pinContinuous,
   onTogglePin,
   contextual,
+  mode = "expanded",
+  onChangeMode,
 }: {
   active: Tool | "opening" | "inspect";
   onSelect: (t: Tool | "opening" | "inspect") => void;
   pinContinuous: boolean;
   onTogglePin: () => void;
   contextual?: React.ReactNode;
+  /** expanded | compact | hidden (focus mode). Defaults to expanded. */
+  mode?: ToolbarMode;
+  onChangeMode?: (m: ToolbarMode) => void;
 }) {
+  // Focus mode: hide the toolbar to maximize canvas, but ALWAYS render a small
+  // restore control so the user can never be trapped (override §4).
+  if (mode === "hidden") {
+    return (
+      <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
+        <button
+          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-base-border bg-base-panel px-3 py-1.5 text-xs text-base-muted shadow-lg hover:text-base-text"
+          style={{ boxShadow: "0 12px 32px rgba(0,0,0,0.45)" }}
+          onClick={() => onChangeMode?.("expanded")}
+          data-testid="toolbar-restore"
+          title="Show design tools (F)"
+          aria-label="Show design tools"
+        >
+          <span aria-hidden>▴</span> Show tools
+        </button>
+      </div>
+    );
+  }
+
+  const compact = mode === "compact";
+
   return (
     <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
       {contextual && (
@@ -60,7 +87,9 @@ export function BottomToolbar({
               aria-pressed={isActive}
               data-testid={`tool-${t.id}`}
               title={`${t.label} (${t.shortcut})`}
-              className={`flex h-11 min-w-[52px] flex-col items-center justify-center rounded-md px-2 text-[10px] transition-colors ${
+              className={`flex flex-col items-center justify-center rounded-md transition-colors ${
+                compact ? "h-9 min-w-[36px] px-1.5" : "h-11 min-w-[52px] px-2 text-[10px]"
+              } ${
                 isActive
                   ? "bg-accent text-white"
                   : "text-base-muted hover:bg-base-border hover:text-base-text"
@@ -69,7 +98,7 @@ export function BottomToolbar({
               <span className="text-sm" aria-hidden>
                 {t.glyph}
               </span>
-              <span className="mt-0.5">{t.label.split(" ")[0]}</span>
+              {!compact && <span className="mt-0.5">{t.label.split(" ")[0]}</span>}
             </button>
           );
         })}
@@ -78,14 +107,30 @@ export function BottomToolbar({
           onClick={onTogglePin}
           aria-pressed={pinContinuous}
           title="Keep drawing tool active after each shape (continuous mode)"
-          className={`flex h-11 min-w-[52px] flex-col items-center justify-center rounded-md px-2 text-[10px] ${
-            pinContinuous ? "bg-accent/20 text-accent" : "text-base-muted hover:bg-base-border"
-          }`}
+          className={`flex flex-col items-center justify-center rounded-md ${
+            compact ? "h-9 min-w-[36px] px-1.5" : "h-11 min-w-[52px] px-2 text-[10px]"
+          } ${pinContinuous ? "bg-accent/20 text-accent" : "text-base-muted hover:bg-base-border"}`}
         >
           <span className="text-sm" aria-hidden>
             {pinContinuous ? "📌" : "📍"}
           </span>
-          <span className="mt-0.5">{pinContinuous ? "Pinned" : "One-shot"}</span>
+          {!compact && <span className="mt-0.5">{pinContinuous ? "Pinned" : "One-shot"}</span>}
+        </button>
+
+        {/* Collapse control: cycles expanded → compact → hidden (focus). */}
+        <button
+          onClick={() => onChangeMode?.(cycleToolbarMode(mode))}
+          title={`${toolbarModeLabel(mode)} — click to change`}
+          aria-label={toolbarModeLabel(mode)}
+          data-testid="toolbar-collapse"
+          className={`flex flex-col items-center justify-center rounded-md text-base-muted hover:bg-base-border hover:text-base-text ${
+            compact ? "h-9 min-w-[36px] px-1.5" : "h-11 min-w-[44px] px-2 text-[10px]"
+          }`}
+        >
+          <span className="text-sm" aria-hidden>
+            {compact ? "▸" : "▾"}
+          </span>
+          {!compact && <span className="mt-0.5">Collapse</span>}
         </button>
       </div>
     </div>
