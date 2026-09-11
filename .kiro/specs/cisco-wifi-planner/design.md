@@ -397,3 +397,54 @@ wrapping the search-params reader in `<Suspense>`, adding route-level `error.tsx
 (project + report), a `global-error.tsx`, and a reusable `ErrorBoundary`, and by
 validating persisted state at the storage boundary (`loadValidatedProject` +
 `migrateProject`) so malformed/legacy data yields a localized error.
+
+---
+
+# Implementation Audit — functional-completion pass
+
+Classification of visible actions and their canonical home. Legend for Action:
+Keep · Consolidate · Move · Hide-until-available · Remove.
+
+| Capability                                | Current UI                                        | Current backend                 | Working              | Duplicate                         | Action                                                                             |
+| ----------------------------------------- | ------------------------------------------------- | ------------------------------- | -------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
+| Switch workspace                          | Left nav rail                                     | client state                    | yes                  | no                                | Keep (canonical)                                                                   |
+| Project/floor/scenario/domain/export      | Top header                                        | localStorage store              | yes                  | no                                | Keep (canonical)                                                                   |
+| Floor selector (change active)            | Top header `<select>`                             | store                           | yes                  | no                                | Keep — selection only, NOT management                                              |
+| Floor management (add/dup/archive/delete) | Hierarchy panel (Floor plans)                     | hierarchy ops via command store | yes                  | `+ Floor` also in header          | Consolidate: header `+ Floor` removed; hierarchy panel is canonical                |
+| Drawing/placement tools                   | Bottom toolbar                                    | editor state machine            | yes                  | no                                | Keep (canonical); add collapse/compact/focus                                       |
+| Selected-object properties                | Right inspector                                   | command store                   | yes                  | no                                | Keep (canonical)                                                                   |
+| Wall material change                      | Inspector (WallProperties) + right-click          | command store                   | yes                  | one contextual shortcut (allowed) | Keep                                                                               |
+| Material create/edit                      | Settings → MaterialLibraryPanel                   | localStorage store              | partial (state-only) | no                                | Fix: persist via ProjectStore; canonical                                           |
+| Heatmap metric/opacity                    | Analysis inspector + VisualizationPanel (opacity) | client state                    | yes                  | opacity in two panels             | Consolidate: opacity canonical in VisualizationPanel; Analysis shows metric+cutoff |
+| RSSI display cutoff                       | none (ad-hoc minThreshold)                        | none persisted                  | no                   | n/a                               | Add: canonical in Analysis → Display Thresholds; persisted per scenario/report     |
+| Layer visibility (Wi-Fi/BLE/UWB)          | LayerPanel                                        | localStorage per-view           | yes                  | no                                | Keep (canonical)                                                                   |
+| BLE/UWB heatmaps                          | not gated by capability                           | technology profiles exist       | partial              | n/a                               | Add capability gating + disabled explanation                                       |
+| 3D view                                   | header 2D/3D/Split toggle                         | derived scene                   | yes                  | no                                | Keep                                                                               |
+
+## Consolidation decisions (this pass)
+
+- Removed the header `+ Floor` quick-button; floor management is solely in the
+  Floor Hierarchy panel (top selector still switches the active floor).
+- RSSI display cutoff lives only in Analysis → Display Thresholds (one canonical
+  control), separate from coverage requirements and color-scale minimum.
+- Heatmap opacity remains in the Visualization panel; the Analysis panel keeps
+  metric + cutoff to avoid two opacity controls.
+- No backend capability was removed; consolidation is UI-only.
+
+## Menu consolidation — applied changes (task #3)
+
+- Removed the header `+ Floor` quick-button. It pushed a bare floor via
+  `createFloor(...)`, bypassing building assignment and sort-order handled by the
+  hierarchy `addFloor` op — a genuine duplicate that could create inconsistent
+  floors. Floor CREATION/duplication/archival/deletion now lives solely in the
+  Floor plans → Hierarchy panel. The header `<select>` remains and only switches
+  the active floor.
+- Audited all UI components for placeholder / non-functional / tech-irrelevant
+  controls. Findings: the remaining `placeholder=` occurrences are legitimate
+  input hints; `disabled=` occurrences are correct state logic (context-menu
+  disabled items, validation-gated Save/Import buttons, WebGL fallback). No
+  prototype or dead controls remain in completed workflows.
+- One canonical location per action confirmed: workspace switch (nav rail),
+  project/export (header), floor management (hierarchy panel), heatmap metric +
+  RSSI cutoff (Analysis inspector), opacity (Visualization panel), layer
+  visibility (Layer panel), drawing/placement (bottom toolbar).
